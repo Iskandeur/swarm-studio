@@ -12,6 +12,10 @@ import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/re
 import App from './App'
 import { useStore } from './store'
 import { PRESETS } from './presets'
+
+// Derived from the preset, never spelled out: the default swarm is CONTENT and it gets rewritten.
+const DEFAULT = PRESETS[0]
+const AGENTS = DEFAULT.agents
 import { setViewport } from './test-setup'
 
 beforeEach(() => {
@@ -33,19 +37,20 @@ test('the app mounts and shows the default swarm', async () => {
   render(<App />)
 
   assert.ok(screen.getByText('Swarm Studio'))
-  // Agents from the default preset, in the roster and on the canvas.
-  assert.ok(screen.getAllByText('Proposer').length > 0)
-  assert.ok(screen.getAllByText('Skeptic').length > 0)
-  assert.ok(screen.getAllByText('Synthesist').length > 0)
+  // Every agent of the default preset shows up, in the roster and on the canvas.
+  for (const agent of AGENTS) {
+    assert.ok(screen.getAllByText(agent.name).length > 0, `${agent.name} is on screen`)
+  }
   assert.ok(screen.getByRole('button', { name: /run swarm/i }))
 })
 
 test('selecting an agent opens its prompt for editing', async () => {
   render(<App />)
 
-  fireEvent.click(screen.getAllByText('Skeptic')[0])
+  const second = AGENTS[1]
+  fireEvent.click(screen.getAllByText(second.name)[0])
   const prompt = await waitFor(() => screen.getByLabelText(/system prompt/i))
-  assert.match((prompt as HTMLTextAreaElement).value, /objection/i)
+  assert.equal((prompt as HTMLTextAreaElement).value, second.systemPrompt)
 })
 
 test('running the demo swarm streams a message into the transcript', async () => {
@@ -81,9 +86,11 @@ test('the model field is reachable without hunting: an agent is already selected
   render(<App />)
 
   const model = screen.getByLabelText(/^model$/i)
-  assert.equal((model as HTMLInputElement).value, 'demo-fast')
+  assert.equal((model as HTMLInputElement).value, AGENTS[0].model)
   // …and the roster shows each agent's model, so it is readable without selecting anything.
-  assert.ok(screen.getAllByText('demo-terse').length > 0)
+  for (const agent of AGENTS) {
+    assert.ok(screen.getAllByText(agent.model).length > 0, `${agent.name}'s model is listed`)
+  }
 })
 
 test('a link can be cut from the panel, in both directions', async () => {
@@ -92,17 +99,26 @@ test('a link can be cut from the panel, in both directions', async () => {
   // affordance, which is the one that works without hover — and is the one a phone needs.
   render(<App />)
 
-  // The default preset is a ring of three: Proposer → Skeptic → Synthesist → Proposer. With Proposer
-  // selected, both its outgoing (Skeptic) and incoming (Synthesist) link are listed.
-  assert.ok(screen.getByRole('button', { name: /cut link to synthesist/i }))
-  fireEvent.click(screen.getByRole('button', { name: /cut link to skeptic/i }))
+  // The first agent is selected on mount, so the panel lists ITS links — both directions.
+  const selected = AGENTS[0]
+  const nameOf = (id: string) => AGENTS.find((a) => a.id === id)!.name
+  const mine = DEFAULT.links.filter((l) => l.source === selected.id || l.target === selected.id)
+  assert.ok(mine.length > 0, 'the fixture is only meaningful if the first agent has links')
 
-  await waitFor(() => assert.equal(useStore.getState().spec.links.length, 2))
+  for (const link of mine) {
+    const other = nameOf(link.source === selected.id ? link.target : link.source)
+    assert.ok(screen.getByRole('button', { name: new RegExp(`cut link to ${other}`, 'i') }), other)
+  }
+
+  const victim = mine[0]
+  const victimName = nameOf(victim.source === selected.id ? victim.target : victim.source)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(`cut link to ${victimName}`, 'i') }))
+
+  await waitFor(() => assert.equal(useStore.getState().spec.links.length, DEFAULT.links.length - 1))
   assert.equal(
-    useStore.getState().spec.links.some((l) => l.source === 'a1' && l.target === 'a2'),
+    useStore.getState().spec.links.some((l) => l.id === victim.id),
     false,
   )
-  assert.equal(screen.queryByRole('button', { name: /cut link to skeptic/i }), null)
 })
 
 test('the topologies explain themselves in a popover', async () => {
@@ -123,8 +139,8 @@ test('transcript output is formatted, not dumped as one blob', async () => {
       {
         id: 'm1',
         round: 1,
-        agentId: 'a1',
-        to: ['a2'],
+        agentId: AGENTS[0].id,
+        to: [AGENTS[1].id],
         text: 'Findings:\n- first point\n- second point\n\n```js\nconst x = 1\n```',
         status: 'complete',
         tokensIn: 10,

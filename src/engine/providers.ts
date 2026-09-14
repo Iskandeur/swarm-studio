@@ -377,12 +377,82 @@ const LOREM = [
   'What we have not answered yet is who owns the step after this one.',
 ]
 
+/**
+ * Lines the demo provider speaks for the characters shipped in the presets, keyed by agent name.
+ *
+ * Why this exists: the point of a preset is that pressing Run with no API key shows you FOUR
+ * visibly different voices reacting to the same input. Generic filler text defeats that — it makes
+ * the swarm look like it ignored both the task and the prompts, which is exactly how a first-time
+ * visitor concludes the product is broken. Unknown agents fall back to `LOREM`, and every demo
+ * message is badged "demo" in the transcript, so nothing here pretends to be a model.
+ */
+export const DEMO_VOICES: Record<string, string[]> = {
+  'The Cat': [
+    'The cat requires the door. The cat does not negotiate with meteorology.',
+    'The cat has reconsidered nothing. The door remains the issue.',
+  ],
+  'The Human': [
+    "Reframing the ask: we're looking at a 40% uplift in perceived autonomy against a modest exposure to precipitation. I've circled back with myself and I'm aligned.",
+    'Taking that away as an action. My action. I am the action.',
+  ],
+  'The Door': [
+    'The door was opened forty-one times yesterday. Hinge temperature nominal. Four millimetres of rain in the last hour. The door has no preference. The door remembers every single one.',
+    'The door is ajar by nine centimetres. This was not the door\'s decision.',
+  ],
+  'The Narrator': [
+    'Here, at the threshold, one of nature\'s oldest negotiations. The human folds, as humans do. The door swings. The cat steps out, considers the rain for two entire seconds, and comes back in. Magnificent.',
+    'And so the council disperses, each member convinced it won.',
+  ],
+  'The Best Man': [
+    'Right. One anecdote from you, one redaction from you, one feeling from you. I am assembling, not writing. Go.',
+    'Approved: the sibling\'s ending, the historian\'s first half, none of the lawyer\'s. We ride in three hours.',
+  ],
+  'The Historian': [
+    'On 14 March 2009 the groom introduced himself to his future wife as "basically a pilot". He was not. He was between jobs. I have the photographs.',
+    'There is also the matter of the kayak. I assume we are including the kayak.',
+  ],
+  'The Lawyer': [
+    'Strike the kayak. Strike "basically a pilot". Retain the word "radiant", which is unfalsifiable.',
+    'Counsel notes the room contains both families and advises against the word "finally".',
+  ],
+  'The Sibling': [
+    'ok but what if you just say he cried at the dog film and then sit down. that\'s the whole speech. everyone will lose it.',
+    'you\'re overthinking the middle bit. the middle bit is that he\'s happy. say that.',
+  ],
+  'The Fact-Checker': [
+    'Established: the cat opens the door. Asserted without evidence: that any high ground was ever held. Unverifiable: the author\'s tone of voice throughout.',
+    'Still outstanding: which of them installed the handle.',
+  ],
+  'The Writer': [
+    'For eleven years the arrangement was clear: I opened the door, and in exchange I was in charge. On Tuesday the cat learned the handle, and the arrangement became a courtesy. Nothing has been said about it. Nothing needs to be.',
+    'Trimmed the second clause. It was doing the work of a sigh.',
+  ],
+  'The Editor': [
+    'Cut to: "I used to open the door. Now I am simply present when it opens." Better. Shorter. Sadder.',
+    'Two words gone. You will not miss them.',
+  ],
+}
+
+/** The agent's name as `buildSystem` writes it — the only stable handle the mock has. */
+export function demoVoiceFor(system: string): string[] {
+  const named = /You are "([^"]+)"/.exec(system)
+  const voice = named ? DEMO_VOICES[named[1]] : undefined
+  return voice ?? LOREM
+}
+
 /** Deterministic-ish local answers so the whole app is demoable with no key at all. */
 async function mock(req: ChatRequest): Promise<ChatResult> {
+  const voice = demoVoiceFor(req.system)
+  const inCharacter = voice !== LOREM
   const seed = req.system.length + req.messages.length * 7 + req.model.length
-  const sentences = req.model === 'demo-terse' ? 1 : req.model === 'demo-verbose' ? 4 : 2
+  // In character, one line IS the answer; the generic filler needs a few to look like a paragraph.
+  const sentences = inCharacter ? 1 : req.model === 'demo-terse' ? 1 : req.model === 'demo-verbose' ? 4 : 2
   const parts: string[] = []
-  for (let i = 0; i < sentences; i++) parts.push(LOREM[(seed + i * 3) % LOREM.length])
+  // The turn number picks the line, so an agent that speaks twice does not repeat itself.
+  const turn = req.messages.filter((m) => m.role === 'assistant').length
+  for (let i = 0; i < sentences; i++) {
+    parts.push(inCharacter ? voice[(turn + i) % voice.length] : voice[(seed + i * 3) % voice.length])
+  }
   const full = parts.join(' ')
   const step = req.model === 'demo-fast' ? 6 : 3
   const pause = req.model === 'demo-fast' ? 8 : 18

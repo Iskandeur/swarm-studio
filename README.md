@@ -34,7 +34,7 @@ order. This app makes the shape the primary object, and the run a thing you can 
 
 | Provider | Key needed | Notes |
 | --- | --- | --- |
-| **Demo** | no | Local canned answers, streamed with realistic timing. Everything works offline. |
+| **Demo** | no | Local canned answers, streamed with realistic timing, and written *in character* for the agents the presets ship with — so pressing Run with no key shows four visibly different voices instead of four paragraphs of filler. Every demo message is badged `demo` in the transcript. |
 | **Anthropic** | yes | Messages API, streamed straight from the browser. |
 | **OpenAI** | yes | `/chat/completions`, streamed. |
 | **OpenRouter** | yes | `/chat/completions`, streamed. |
@@ -85,7 +85,7 @@ Everything the UI animates comes out of engine callbacks (`onAgentStatus`, `onMe
 src/
   types.ts              domain model
   store.ts              zustand store, localStorage persistence
-  presets.ts            three starter swarms
+  presets.ts            three starter swarms, and the demo voices that make them readable
   theme.ts              Material theme + per-agent colour derivation
   engine/
     providers.ts        one streaming adapter per provider

@@ -8,6 +8,10 @@ import { test, beforeEach } from 'vitest'
 import { useStore } from './store'
 import { PRESETS } from './presets'
 
+// Derived, never hardcoded. A preset is CONTENT and it gets rewritten; a store test that names
+// `a1` then fails for a reason that says nothing about the store.
+const [FIRST, SECOND, THIRD] = PRESETS[0].agents.map((a) => a.id)
+
 beforeEach(() => {
   localStorage.clear()
   useStore.getState().loadPreset(PRESETS[0])
@@ -16,35 +20,45 @@ beforeEach(() => {
 const spec = () => useStore.getState().spec
 
 test('deleting an agent takes its links and its entry flag with it', () => {
-  useStore.getState().toggleEntry('a2')
-  useStore.getState().select('a2')
-  assert.ok(spec().entryIds.includes('a2'))
+  useStore.getState().toggleEntry(SECOND)
+  useStore.getState().select(SECOND)
+  assert.ok(spec().entryIds.includes(SECOND))
 
-  useStore.getState().removeAgent('a2')
+  useStore.getState().removeAgent(SECOND)
 
-  assert.equal(spec().agents.some((a) => a.id === 'a2'), false)
-  assert.equal(spec().links.some((l) => l.source === 'a2' || l.target === 'a2'), false)
-  assert.equal(spec().entryIds.includes('a2'), false)
+  assert.equal(spec().agents.some((a) => a.id === SECOND), false)
+  assert.equal(spec().links.some((l) => l.source === SECOND || l.target === SECOND), false)
+  assert.equal(spec().entryIds.includes(SECOND), false)
   assert.equal(useStore.getState().selectedId, undefined, 'the deleted agent stops being selected')
 })
 
 test('deleting several at once leaves no dangling link either', () => {
-  useStore.getState().setMulti(['a1', 'a3'])
-  useStore.getState().removeAgents(['a1', 'a3'])
+  const doomed = [FIRST, THIRD]
+  useStore.getState().setMulti(doomed)
+  useStore.getState().removeAgents(doomed)
 
-  assert.deepEqual(spec().agents.map((a) => a.id), ['a2'])
-  assert.deepEqual(spec().links, [])
+  const survivors = new Set(spec().agents.map((a) => a.id))
+  for (const id of doomed) assert.equal(survivors.has(id), false, `${id} is gone`)
+  assert.equal(survivors.size, PRESETS[0].agents.length - doomed.length)
+  // The property that matters: every remaining link points at two agents that still exist.
+  for (const link of spec().links) {
+    assert.ok(survivors.has(link.source) && survivors.has(link.target), `dangling link ${link.id}`)
+  }
   assert.deepEqual(useStore.getState().multiIds, [], 'the bulk selection drops the dead ids')
 })
 
 test('a bulk patch reaches every ticked agent and nobody else', () => {
-  useStore.getState().applyToAgents(['a1', 'a3'], { model: 'shared-model', provider: 'openai' })
+  const untouched = spec().agents.find((a) => a.id === SECOND)!
+  const before = { model: untouched.model, provider: untouched.provider }
+
+  useStore.getState().applyToAgents([FIRST, THIRD], { model: 'shared-model', provider: 'openai' })
 
   const byId = Object.fromEntries(spec().agents.map((a) => [a.id, a]))
-  assert.equal(byId.a1.model, 'shared-model')
-  assert.equal(byId.a3.model, 'shared-model')
-  assert.equal(byId.a1.provider, 'openai')
-  assert.equal(byId.a2.model, 'demo-terse', 'the unticked agent is untouched')
+  assert.equal(byId[FIRST].model, 'shared-model')
+  assert.equal(byId[THIRD].model, 'shared-model')
+  assert.equal(byId[FIRST].provider, 'openai')
+  assert.equal(byId[SECOND].model, before.model, 'the unticked agent is untouched')
+  assert.equal(byId[SECOND].provider, before.provider)
 })
 
 test('an empty bulk selection is a no-op, not a wipe', () => {
@@ -93,16 +107,16 @@ test('a new edit clears the redo branch', () => {
 })
 
 test('duplicating an agent copies its settings but not its identity', () => {
-  useStore.getState().applyToAgents(['a1'], { model: 'peculiar-model', systemPrompt: 'be odd' })
-  useStore.getState().duplicateAgent('a1')
+  useStore.getState().applyToAgents([FIRST], { model: 'peculiar-model', systemPrompt: 'be odd' })
+  useStore.getState().duplicateAgent(FIRST)
 
   const copy = spec().agents.at(-1)!
-  assert.notEqual(copy.id, 'a1')
+  assert.notEqual(copy.id, FIRST)
   assert.equal(copy.model, 'peculiar-model')
   assert.equal(copy.systemPrompt, 'be odd')
   assert.match(copy.name, /copy/i)
   // Offset, so it does not hide under the original.
-  assert.notDeepEqual(copy.position, spec().agents.find((a) => a.id === 'a1')!.position)
+  assert.notDeepEqual(copy.position, spec().agents.find((a) => a.id === FIRST)!.position)
   assert.deepEqual(spec().links.filter((l) => l.source === copy.id || l.target === copy.id), [])
 })
 
@@ -139,8 +153,8 @@ test('a bulk model apply is undoable, provider and model together', () => {
   // restored while the model stayed from the other provider, a pairing that cannot work.
   const before = spec().agents.map((a) => ({ id: a.id, provider: a.provider, model: a.model }))
 
-  useStore.getState().applyToAgents(['a1', 'a2'], { provider: 'anthropic', model: 'claude-sonnet-5' })
-  assert.equal(spec().agents.find((a) => a.id === 'a1')!.model, 'claude-sonnet-5')
+  useStore.getState().applyToAgents([FIRST, SECOND], { provider: 'anthropic', model: 'claude-sonnet-5' })
+  assert.equal(spec().agents.find((a) => a.id === FIRST)!.model, 'claude-sonnet-5')
 
   useStore.getState().undo()
   for (const original of before) {
