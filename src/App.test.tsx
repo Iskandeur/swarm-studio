@@ -159,6 +159,64 @@ test('transcript output is formatted, not dumped as one blob', async () => {
   await waitFor(() => assert.equal(screen.queryAllByRole('listitem').length, 0))
 })
 
+test('the share dialog copies a swarm and a clipping, and takes a paste', async () => {
+  // His ask: "une convention de formattage json, pour que je puisse copier coller des nodes et des
+  // graphes […] pour qu'un pote puisse reproduire la config".
+  render(<App />)
+
+  fireEvent.click(screen.getByRole('button', { name: /share this configuration/i }))
+  await waitFor(() => assert.ok(screen.getByText(/share this configuration/i)))
+
+  // Both blocks are offered: the whole swarm, and just what is selected.
+  assert.match(screen.getByText(/the whole swarm/i).textContent ?? '', /\d+ agents, \d+ links/)
+  assert.ok(screen.getByText(/just the selection/i))
+
+  // And the paste side accepts a clipping, which lands in the swarm.
+  fireEvent.click(screen.getByRole('tab', { name: /paste in/i }))
+  const box = await waitFor(() => screen.getByLabelText(/paste a swarm or a clipping/i))
+  const before = useStore.getState().spec.agents.length
+  fireEvent.change(box, {
+    target: {
+      value: JSON.stringify({
+        format: 'swarm-studio',
+        kind: 'agents',
+        agents: [{ id: 'guest', name: 'A Friend', model: 'demo-fast', systemPrompt: 'You visit.' }],
+        links: [],
+      }),
+    },
+  })
+  fireEvent.click(screen.getByRole('button', { name: /load it/i }))
+
+  await waitFor(() => assert.equal(useStore.getState().spec.agents.length, before + 1))
+  assert.ok(useStore.getState().spec.agents.some((a) => a.name === 'A Friend'))
+})
+
+test('a bad paste explains itself instead of doing nothing', async () => {
+  render(<App />)
+  fireEvent.click(screen.getByRole('button', { name: /share this configuration/i }))
+  fireEvent.click(await waitFor(() => screen.getByRole('tab', { name: /paste in/i })))
+
+  const box = screen.getByLabelText(/paste a swarm or a clipping/i)
+  const before = useStore.getState().spec.agents.length
+  fireEvent.change(box, { target: { value: 'this is not json' } })
+  fireEvent.click(screen.getByRole('button', { name: /load it/i }))
+
+  await waitFor(() => assert.ok(screen.getByText(/does not look like JSON/i)))
+  assert.equal(useStore.getState().spec.agents.length, before, 'and nothing was changed')
+})
+
+test('every node carries a visible delete button', async () => {
+  // He reported having no way to delete a node except the Delete key. The roster button is the one
+  // jsdom can see; the ✕ on the node itself needs React Flow to have measured the canvas.
+  render(<App />)
+  for (const agent of AGENTS) {
+    assert.ok(
+      screen.getByRole('button', { name: new RegExp(`delete agent ${agent.name}`, 'i') }),
+      `${agent.name} can be deleted from the roster`,
+    )
+  }
+})
+
 test('at phone width the panels become sheets and Run is one tap away', async () => {
   setViewport(390)
   render(<App />)

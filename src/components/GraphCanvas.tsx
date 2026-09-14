@@ -68,7 +68,6 @@ export function GraphCanvas({ onAgentOpen }: { onAgentOpen?: () => void } = {}) 
           status: statuses[agent.id] ?? ('idle' as const),
           isEntry: entryIds.includes(agent.id),
           live: live[agent.id] ?? '',
-          tokensOut: 0,
         }
         return existing
           ? { ...existing, position: existing.dragging ? existing.position : agent.position, selected: agent.id === selectedId, data }

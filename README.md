@@ -27,7 +27,8 @@ order. This app makes the shape the primary object, and the run a thing you can 
 | **Choose a propagation rule** | `Broadcast` — every outgoing link carries the message. `Round-robin` — one link per turn, rotating. `Manager` — the entry agent delegates, workers report back, the manager speaks again with every reply in hand. |
 | **Pick the entry points** | Mark which agents receive the task. With none marked, every agent that has no incoming link starts the run. |
 | **Watch it run** | Per-node status and a live tail of the text being produced, an animated packet on every link that carries a message, a colour-matched transcript, round and token counters. |
-| **Export** | Download the swarm as JSON. |
+| **Share a configuration** | Copy the whole swarm, or just the agents you ticked, as JSON. Paste it into someone else's Swarm Studio and they get your setup — `Ctrl/⌘ + C`, `X` and `V` work on the canvas too, so cutting an agent puts it on the clipboard on its way out. API keys and endpoint URLs deliberately never travel. Format: [`docs/format.md`](docs/format.md). |
+| **Export** | Download the swarm as JSON, in the same documented shape. |
 | **Use it on a phone** | Below 900px the graph keeps the whole screen and the three panels become bottom sheets, with Run always one tap away. Pinch to zoom, drag to pan, and the connect dots grow on touch pointers. |
 
 ## Providers

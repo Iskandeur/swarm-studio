@@ -14,12 +14,15 @@ export type InlineToken =
   | { kind: 'bold'; text: string }
   | { kind: 'italic'; text: string }
 
+export type Alignment = 'left' | 'center' | 'right'
+
 export type Block =
   | { kind: 'paragraph'; inlines: InlineToken[] }
   | { kind: 'heading'; level: number; inlines: InlineToken[] }
   | { kind: 'quote'; inlines: InlineToken[] }
   | { kind: 'list'; ordered: boolean; items: InlineToken[][] }
   | { kind: 'code'; language: string; text: string }
+  | { kind: 'table'; head: InlineToken[][]; rows: InlineToken[][][]; align: Alignment[] }
 
 /**
  * Splits inline emphasis. Order matters: code spans win over emphasis, because `**` inside a code
@@ -47,6 +50,32 @@ const ORDERED = /^\s*(\d+)[.)]\s+(.*)$/
 const HEADING = /^(#{1,4})\s+(.*)$/
 const QUOTE = /^>\s?(.*)$/
 const FENCE = /^```\s*([\w+-]*)\s*$/
+/**
+ * A row of a GitHub-flavoured table: any line carrying a pipe. Leading and trailing pipes are
+ * optional, because models emit both `| a | b |` and `a | b`.
+ */
+const TABLE_ROW = /\|/
+/**
+ * The separator under the header: `|---|:--:|---:|`. It is what makes a table a table, and a SINGLE
+ * dash is legal (`:-:`), which a `-{2,}` would have rejected.
+ */
+const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
+
+/** Splits `| a | b |` into `['a','b']`, tolerating a missing leading or trailing pipe. */
+export function splitRow(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
+  return trimmed.split('|').map((cell) => cell.trim())
+}
+
+function alignmentsFrom(rule: string): Alignment[] {
+  return splitRow(rule).map((cell) => {
+    const left = cell.startsWith(':')
+    const right = cell.endsWith(':')
+    if (left && right) return 'center'
+    if (right) return 'right'
+    return 'left'
+  })
+}
 
 /**
  * Groups lines into blocks. Tolerant by design: an unclosed code fence still renders as code,
@@ -88,6 +117,29 @@ export function parseBlocks(source: string): Block[] {
 
     if (line.trim() === '') {
       flushAll()
+      continue
+    }
+
+    // A table is recognised by its SEPARATOR, not by its pipes: a paragraph can contain a pipe, and
+    // a single `| a | b |` line with no rule under it is not a table. Checking line i+1 is what
+    // keeps ordinary prose from being eaten.
+    if (TABLE_ROW.test(line) && i + 1 < lines.length && TABLE_RULE.test(lines[i + 1])) {
+      flushAll()
+      const head = splitRow(line)
+      const align = alignmentsFrom(lines[i + 1])
+      i += 2
+      const rows: string[][] = []
+      while (i < lines.length && TABLE_ROW.test(lines[i])) rows.push(splitRow(lines[i++]))
+      i-- // the for-loop's i++ will step past the first non-row line
+      blocks.push({
+        kind: 'table',
+        head: head.map(parseInline),
+        // Ragged rows are normal in streamed output: pad short ones instead of dropping cells.
+        rows: rows.map((row) =>
+          Array.from({ length: head.length }, (_, column) => parseInline(row[column] ?? '')),
+        ),
+        align: Array.from({ length: head.length }, (_, column) => align[column] ?? 'left'),
+      })
       continue
     }
 
@@ -188,6 +240,49 @@ export function RichText({ source }: { source: string }) {
               }}
             >
               {block.text}
+            </Box>
+          )
+        }
+        if (block.kind === 'table') {
+          return (
+            <Box key={index} sx={{ my: 1, overflowX: 'auto' }}>
+              <Box
+                component="table"
+                sx={{
+                  borderCollapse: 'collapse',
+                  width: '100%',
+                  fontSize: 12.5,
+                  '& th, & td': {
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    px: 0.9,
+                    py: 0.5,
+                    verticalAlign: 'top',
+                  },
+                  '& th': { bgcolor: 'action.hover', fontWeight: 600, whiteSpace: 'nowrap' },
+                }}
+              >
+                <thead>
+                  <tr>
+                    {block.head.map((cell, column) => (
+                      <th key={column} style={{ textAlign: block.align[column] }}>
+                        <Inlines tokens={cell} />
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {row.map((cell, column) => (
+                        <td key={column} style={{ textAlign: block.align[column] }}>
+                          <Inlines tokens={cell} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </Box>
             </Box>
           )
         }

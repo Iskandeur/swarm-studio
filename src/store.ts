@@ -3,6 +3,7 @@ import type { Agent, AgentStatus, Link, ProviderId, RunPhase, SwarmSpec, Topolog
 import { DEFAULT_SPEC } from './presets'
 import { runSwarm, type TransitPacket } from './engine/runner'
 import { createRunSession, type RunSession } from './engine/session'
+import { rekey } from './engine/portable'
 
 const SPEC_KEY = 'swarm-studio.spec.v1'
 const KEYS_KEY = 'swarm-studio.keys.v1'
@@ -104,6 +105,10 @@ interface State {
   applyToAgents: (ids: string[], patch: Partial<Agent>) => void
   duplicateAgent: (id: string) => void
   removeAgents: (ids: string[]) => void
+  /** Drops a pasted clipping into the current swarm, re-keying whatever collides. */
+  pasteAgents: (incoming: { agents: Agent[]; links: Link[] }) => number
+  /** Replaces the whole swarm with a pasted one. */
+  replaceSwarm: (spec: SwarmSpec) => void
   undo: () => void
   redo: () => void
   dismissNotice: () => void
@@ -359,6 +364,39 @@ export const useStore = create<State>((set, get) => {
         return spec
       })
       set({ selectedId: copy.id })
+    },
+
+    pasteAgents: (incoming) => {
+      if (incoming.agents.length === 0) return 0
+      const taken = new Set(get().spec.agents.map((a) => a.id))
+      const stamp = Date.now().toString(36)
+      const { agents, links } = rekey(incoming, taken, (index) => `p${stamp}${index}`)
+      mutate((spec) => {
+        spec.agents.push(...agents)
+        spec.links.push(...links)
+        return spec
+      })
+      set({ selectedId: agents[0]?.id, multiIds: agents.map((a) => a.id) })
+      return agents.length
+    },
+
+    replaceSwarm: (incoming) => {
+      haltRun()
+      const spec = structuredClone(incoming)
+      persistSpec(spec)
+      set({
+        spec,
+        transcript: [],
+        statuses: {},
+        round: 0,
+        phase: 'idle',
+        error: undefined,
+        notice: undefined,
+        selectedId: spec.agents[0]?.id,
+        multiIds: [],
+        past: [],
+        future: [],
+      })
     },
 
     applyToAgents: (ids, patch) => {

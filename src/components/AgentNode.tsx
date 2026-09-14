@@ -17,7 +17,6 @@ export type AgentNodeData = {
   isEntry: boolean
   /** Tail of the message being produced right now, so the node itself shows life. */
   live: string
-  tokensOut: number
 }
 
 export type AgentFlowNode = Node<AgentNodeData, 'agent'>
@@ -103,10 +102,13 @@ export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
             right: 4,
             width: 20,
             height: 20,
-            opacity: touch || selected ? 0.55 : 0,
+            // Always visible, faintly. It used to be `opacity: 0` until hover, and Iskandeur
+            // reported having "no way to delete a node except the Delete key" — an affordance you
+            // have to discover by accident is not an affordance.
+            opacity: selected || touch ? 0.65 : 0.3,
             transition: 'opacity .18s ease',
             '&:hover': { opacity: 1, color: 'error.main' },
-            '.react-flow__node:hover &': { opacity: 0.55 },
+            '.react-flow__node:hover &': { opacity: 0.8 },
           }}
         >
           <CloseRoundedIcon sx={{ fontSize: 14 }} />

@@ -92,3 +92,52 @@ test('empty input yields no blocks, and never throws', () => {
 test('CRLF text parses like LF text', () => {
   assert.deepEqual(parseBlocks('a\r\n\r\nb'), parseBlocks('a\n\nb'))
 })
+
+test('a markdown table becomes a table, with its alignments', () => {
+  const blocks = parseBlocks('| Model | idx | Notes |\n|---|--:|:-:|\n| gpt-5.2 | 30.4 | good |\n| oss | 12.3 | fast |')
+  assert.equal(blocks.length, 1)
+  if (blocks[0].kind !== 'table') throw new Error('expected a table')
+  assert.deepEqual(blocks[0].head.map((cell) => cell.map((t) => t.text).join('')), ['Model', 'idx', 'Notes'])
+  assert.deepEqual(blocks[0].align, ['left', 'right', 'center'])
+  assert.equal(blocks[0].rows.length, 2)
+  assert.deepEqual(blocks[0].rows[0].map((cell) => cell.map((t) => t.text).join('')), ['gpt-5.2', '30.4', 'good'])
+})
+
+test('a table without the leading and trailing pipes still parses', () => {
+  const blocks = parseBlocks('a | b\n--- | ---\n1 | 2')
+  assert.equal(blocks[0].kind, 'table')
+  if (blocks[0].kind !== 'table') throw new Error('expected a table')
+  assert.deepEqual(blocks[0].rows[0].map((cell) => cell.map((t) => t.text).join('')), ['1', '2'])
+})
+
+test('a ragged row is padded, not dropped', () => {
+  // Normal while streaming: the row arrives before all its cells do.
+  const blocks = parseBlocks('| a | b | c |\n|---|---|---|\n| 1 |')
+  if (blocks[0].kind !== 'table') throw new Error('expected a table')
+  assert.equal(blocks[0].rows[0].length, 3)
+  assert.deepEqual(blocks[0].rows[0].map((cell) => cell.map((t) => t.text).join('')), ['1', '', ''])
+})
+
+test('a pipe in ordinary prose is NOT a table', () => {
+  // This is the regression that matters: without the separator check, any sentence with a pipe in it
+  // would be swallowed into a one-row table and stop reading like a sentence.
+  const blocks = parseBlocks('use a | b for alternation')
+  assert.equal(blocks[0].kind, 'paragraph')
+  // …and a lone pipe row with nothing under it is prose too.
+  assert.equal(parseBlocks('| not | a table |')[0].kind, 'paragraph')
+})
+
+test('inline formatting works inside table cells, and text after a table survives', () => {
+  const blocks = parseBlocks('| a | b |\n|---|---|\n| `code` | **bold** |\n\nafter the table')
+  if (blocks[0].kind !== 'table') throw new Error('expected a table')
+  assert.deepEqual(blocks[0].rows[0][0], [{ kind: 'code', text: 'code' }])
+  assert.deepEqual(blocks[0].rows[0][1], [{ kind: 'bold', text: 'bold' }])
+  assert.equal(blocks[1].kind, 'paragraph')
+  assert.deepEqual(blocks[1], { kind: 'paragraph', inlines: [{ kind: 'text', text: 'after the table' }] })
+})
+
+test('a table inside a code fence stays code', () => {
+  const blocks = parseBlocks('```\n| a | b |\n|---|---|\n```')
+  assert.equal(blocks.length, 1)
+  assert.equal(blocks[0].kind, 'code')
+})

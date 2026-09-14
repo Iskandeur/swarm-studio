@@ -14,6 +14,7 @@ import {
   TextField,
   Tooltip,
   Typography,
+  useMediaQuery,
 } from '@mui/material'
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
@@ -21,11 +22,26 @@ import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import LinkOffRoundedIcon from '@mui/icons-material/LinkOffRounded'
 import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded'
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
+import PauseRoundedIcon from '@mui/icons-material/PauseRounded'
+import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
+import StopRoundedIcon from '@mui/icons-material/StopRounded'
 import { useStore } from '../store'
 import { modelForProvider, PROVIDERS, providerInfo, resolveEndpoint } from '../engine/providers'
 import { resolveEntryIds } from '../engine/runner'
 import { agentColor } from '../theme'
 import type { ProviderId } from '../types'
+
+/** Names for the eight hues, so a colour swatch can be announced as something other than a number. */
+const HUE_NAMES: Record<number, string> = {
+  262: 'violet',
+  210: 'blue',
+  168: 'teal',
+  132: 'green',
+  48: 'amber',
+  32: 'orange',
+  4: 'red',
+  300: 'magenta',
+}
 
 /** Left panel: the agent roster, and everything about the one you selected. */
 export function Inspector() {
@@ -42,6 +58,11 @@ export function Inspector() {
   const toggleMulti = useStore((s) => s.toggleMulti)
   const setMulti = useStore((s) => s.setMulti)
   const applyToAgents = useStore((s) => s.applyToAgents)
+  const phase = useStore((s) => s.phase)
+  const pause = useStore((s) => s.pause)
+  const resume = useStore((s) => s.resume)
+  const stop = useStore((s) => s.stop)
+  const compact = useMediaQuery('(max-width:899.95px)')
   const [bulkModel, setBulkModel] = useState('')
   const keys = useStore((s) => s.keys)
   const endpoints = useStore((s) => s.endpoints)
@@ -81,6 +102,30 @@ export function Inspector() {
         <Typography variant="subtitle2" sx={{ flex: 1, opacity: 0.7 }}>
           AGENTS · {spec.agents.length}
         </Typography>
+        {/* On a phone this panel is a modal sheet, so the bottom bar's Pause and Stop are behind it.
+            A run you are watching from here has to be stoppable from here. */}
+        {compact && (phase === 'running' || phase === 'paused') && (
+          <>
+            {phase === 'running' ? (
+              <Tooltip title="Pause after the current round">
+                <IconButton size="small" onClick={pause} aria-label="Pause the run">
+                  <PauseRoundedIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            ) : (
+              <Tooltip title="Resume">
+                <IconButton size="small" color="primary" onClick={resume} aria-label="Resume the run">
+                  <PlayArrowRoundedIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+            <Tooltip title="Stop the run">
+              <IconButton size="small" color="error" onClick={stop} aria-label="Stop the run">
+                <StopRoundedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </>
+        )}
         <Button size="small" startIcon={<AddRoundedIcon />} onClick={addAgent}>
           Add
         </Button>
@@ -91,10 +136,23 @@ export function Inspector() {
           <Paper
             key={a.id}
             elevation={0}
+            // Reachable by keyboard and announced by name: it was a click-only div, which means it
+            // did not exist for anyone navigating with Tab or a screen reader.
+            role="button"
+            tabIndex={0}
+            aria-label={`Select ${a.name}, model ${a.model || 'not set'}`}
+            aria-pressed={a.id === selectedId}
             onClick={() => select(a.id)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                select(a.id)
+              }
+            }}
             sx={{
               px: 1.25,
               py: 0.5,
+              '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 2 },
               display: 'flex',
               alignItems: 'center',
               gap: 0.5,
@@ -324,16 +382,25 @@ export function Inspector() {
               {[262, 210, 168, 132, 48, 32, 4, 300].map((hue) => (
                 <Box
                   key={hue}
+                  component="button"
+                  type="button"
+                  // A real button, with a name: the swatches were bare divs, invisible to Tab and
+                  // unnamed to a screen reader. 28px so a fingertip can hit one.
+                  aria-label={`Colour ${HUE_NAMES[hue] ?? hue}`}
+                  aria-pressed={agent.hue === hue}
                   onClick={() => updateAgent(agent.id, { hue })}
                   sx={{
-                    width: 22,
-                    height: 22,
+                    width: 28,
+                    height: 28,
+                    p: 0,
+                    border: 'none',
                     borderRadius: '50%',
                     cursor: 'pointer',
                     bgcolor: agentColor(hue, themeMode),
                     outline: agent.hue === hue ? '2px solid' : 'none',
                     outlineColor: 'text.primary',
                     outlineOffset: 2,
+                    '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 3 },
                   }}
                 />
               ))}

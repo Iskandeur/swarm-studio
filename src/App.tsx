@@ -34,6 +34,7 @@ import { GraphCanvas } from './components/GraphCanvas'
 import { TranscriptPanel } from './components/TranscriptPanel'
 import { RunBar } from './components/RunBar'
 import { SettingsDialog } from './components/SettingsDialog'
+import { ShareDialog } from './components/ShareDialog'
 import { SHORTCUTS, useHotkeys } from './components/useHotkeys'
 
 type Sheet = 'agents' | 'setup' | 'log' | null
@@ -43,6 +44,7 @@ export default function App() {
   const theme = useMemo(() => buildTheme(themeMode), [themeMode])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const notice = useStore((s) => s.notice)
   const dismissNotice = useStore((s) => s.dismissNotice)
 
@@ -51,9 +53,14 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Shell onOpenSettings={() => setSettingsOpen(true)} onOpenHelp={() => setHelpOpen(true)} />
+      <Shell
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenHelp={() => setHelpOpen(true)}
+        onOpenShare={() => setShareOpen(true)}
+      />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <ShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} />
       {/* A model refusing a parameter is not a failure, so it must not look like one — but it has
           to be visible, or the slider silently lies about what was sent. */}
       <Snackbar
@@ -111,7 +118,15 @@ function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void
   )
 }
 
-function Shell({ onOpenSettings, onOpenHelp }: { onOpenSettings: () => void; onOpenHelp: () => void }) {
+function Shell({
+  onOpenSettings,
+  onOpenHelp,
+  onOpenShare,
+}: {
+  onOpenSettings: () => void
+  onOpenHelp: () => void
+  onOpenShare: () => void
+}) {
   // `md` is the switch: below it there is no room for three columns side by side.
   const mobile = useMediaQuery('(max-width:899.95px)')
 
@@ -125,7 +140,7 @@ function Shell({ onOpenSettings, onOpenHelp }: { onOpenSettings: () => void; onO
         overflow: 'hidden',
       }}
     >
-      <TopBar onOpenSettings={onOpenSettings} onOpenHelp={onOpenHelp} />
+      <TopBar onOpenSettings={onOpenSettings} onOpenHelp={onOpenHelp} onOpenShare={onOpenShare} />
       {mobile ? <MobileBody /> : <DesktopBody />}
     </Box>
   )

@@ -22,20 +22,24 @@ import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded'
+import IosShareRoundedIcon from '@mui/icons-material/IosShareRounded'
 import MoreVertRoundedIcon from '@mui/icons-material/MoreVertRounded'
 import UndoRoundedIcon from '@mui/icons-material/UndoRounded'
 import RedoRoundedIcon from '@mui/icons-material/RedoRounded'
 import KeyboardRoundedIcon from '@mui/icons-material/KeyboardRounded'
 import { useStore } from '../store'
 import { PRESETS } from '../presets'
+import { exportSwarm } from '../engine/portable'
 import { SwarmSettings } from './SwarmSettings'
 
 export function TopBar({
   onOpenSettings,
   onOpenHelp,
+  onOpenShare,
 }: {
   onOpenSettings: () => void
   onOpenHelp: () => void
+  onOpenShare: () => void
 }) {
   const theme = useTheme()
   const compact = useMediaQuery(theme.breakpoints.down('md'))
@@ -51,7 +55,9 @@ export function TopBar({
   const [overflow, setOverflow] = useState<HTMLElement | null>(null)
 
   const exportSpec = () => {
-    const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' })
+    // The same documented shape the Share dialog copies, so a downloaded file and a pasted block
+    // are interchangeable. Two export formats for one app would be one format too many.
+    const blob = new Blob([exportSwarm(spec)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -152,6 +158,17 @@ export function TopBar({
               </MenuItem>
               <MenuItem
                 onClick={() => {
+                  onOpenShare()
+                  setOverflow(null)
+                }}
+              >
+                <ListItemIcon>
+                  <IosShareRoundedIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Share configuration</ListItemText>
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
                   onOpenHelp()
                   setOverflow(null)
                 }}
@@ -179,7 +196,12 @@ export function TopBar({
         ) : (
           <Stack direction="row" spacing={1.5} alignItems="center">
             <SwarmSettings />
-            <Tooltip title="Export this swarm as JSON">
+            <Tooltip title="Share this configuration (copy or paste JSON)">
+              <IconButton onClick={onOpenShare} aria-label="Share this configuration">
+                <IosShareRoundedIcon />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Download this swarm as a JSON file">
               <IconButton onClick={exportSpec}>
                 <DownloadRoundedIcon />
               </IconButton>

@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useStore } from '../store'
+import { exportAgents, parsePortable } from '../engine/portable'
 
 export interface Shortcut {
   keys: string
@@ -9,6 +10,9 @@ export interface Shortcut {
 /** Shown in the help dialog, and the single source of truth for what is actually bound below. */
 export const SHORTCUTS: Shortcut[] = [
   { keys: 'Delete / Backspace', what: 'Delete the selected agent (never the ticked ones)' },
+  { keys: 'Ctrl/⌘ + C', what: 'Copy the selection as JSON' },
+  { keys: 'Ctrl/⌘ + X', what: 'Cut it: JSON on the clipboard, agent off the canvas' },
+  { keys: 'Ctrl/⌘ + V', what: 'Paste agents or a whole swarm from JSON' },
   { keys: 'Ctrl/⌘ + Z', what: 'Undo' },
   { keys: 'Ctrl/⌘ + Shift + Z', what: 'Redo' },
   { keys: 'Ctrl/⌘ + Enter', what: 'Run the swarm, or stop it' },
@@ -62,6 +66,43 @@ export function useHotkeys({ onHelp }: { onHelp: () => void }) {
       if (mod && event.key.toLowerCase() === 'a') {
         event.preventDefault()
         store.setMulti(store.spec.agents.map((a) => a.id))
+        return
+      }
+
+      /**
+       * Copy, cut and paste as JSON — the answer to "I want to remove a node without losing its
+       * configuration". Cut puts the agent on the clipboard on its way out, so deleting and keeping
+       * are the same gesture.
+       */
+      if (mod && (event.key.toLowerCase() === 'c' || event.key.toLowerCase() === 'x')) {
+        const ids = store.multiIds.length > 0 ? store.multiIds : store.selectedId ? [store.selectedId] : []
+        if (ids.length === 0) return
+        // Let the browser handle it when the user is actually selecting text on the page.
+        if (!window.getSelection()?.isCollapsed) return
+        event.preventDefault()
+        const json = exportAgents(store.spec, ids)
+        void navigator.clipboard?.writeText(json).then(
+          () => {
+            if (event.key.toLowerCase() === 'x') store.removeAgents(ids)
+          },
+          // A failed copy must NOT delete: losing the agent and the clipboard at once is the worst case.
+          () => {},
+        )
+        return
+      }
+      if (mod && event.key.toLowerCase() === 'v') {
+        if (!navigator.clipboard?.readText) return
+        event.preventDefault()
+        void navigator.clipboard.readText().then((text) => {
+          const result = parsePortable(text)
+          if (!result.ok) return
+          if (result.value.kind === 'swarm') {
+            const { name, task, topology, maxRounds, entryIds, agents, links } = result.value
+            store.replaceSwarm({ name, task, topology, maxRounds, entryIds, agents, links })
+          } else {
+            store.pasteAgents({ agents: result.value.agents, links: result.value.links })
+          }
+        })
         return
       }
       if (mod) return
