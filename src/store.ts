@@ -6,6 +6,8 @@ import { runSwarm } from './engine/runner'
 const SPEC_KEY = 'swarm-studio.spec.v1'
 const KEYS_KEY = 'swarm-studio.keys.v1'
 const THEME_KEY = 'swarm-studio.theme.v1'
+const ENDPOINTS_KEY = 'swarm-studio.endpoints.v1'
+const MODELS_KEY = 'swarm-studio.models.v1'
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -29,6 +31,10 @@ interface State {
   transit: string[]
   selectedId?: string
   keys: Partial<Record<ProviderId, string>>
+  /** Per-provider endpoint override. Typed by the user, kept in this browser only. */
+  endpoints: Partial<Record<ProviderId, string>>
+  /** Models discovered from an endpoint's /models, offered as autocomplete options. */
+  discoveredModels: Partial<Record<ProviderId, string[]>>
   themeMode: 'light' | 'dark'
 
   setSpec: (patch: Partial<SwarmSpec>) => void
@@ -43,6 +49,8 @@ interface State {
   select: (id?: string) => void
   setTopology: (topology: Topology) => void
   setKey: (provider: ProviderId, value: string) => void
+  setEndpoint: (provider: ProviderId, value: string) => void
+  setDiscoveredModels: (provider: ProviderId, models: string[]) => void
   toggleTheme: () => void
   start: () => void
   stop: () => void
@@ -68,6 +76,8 @@ export const useStore = create<State>((set, get) => {
     transcript: [],
     transit: [],
     keys: load(KEYS_KEY, {}),
+    endpoints: load(ENDPOINTS_KEY, {}),
+    discoveredModels: load(MODELS_KEY, {}),
     themeMode: load<'light' | 'dark'>(THEME_KEY, 'dark'),
 
     setSpec: (patch) => mutate((spec) => ({ ...spec, ...patch })),
@@ -148,6 +158,18 @@ export const useStore = create<State>((set, get) => {
       set({ keys })
     },
 
+    setEndpoint: (provider, value) => {
+      const endpoints = { ...get().endpoints, [provider]: value }
+      localStorage.setItem(ENDPOINTS_KEY, JSON.stringify(endpoints))
+      set({ endpoints })
+    },
+
+    setDiscoveredModels: (provider, models) => {
+      const discoveredModels = { ...get().discoveredModels, [provider]: models }
+      localStorage.setItem(MODELS_KEY, JSON.stringify(discoveredModels))
+      set({ discoveredModels })
+    },
+
     toggleTheme: () => {
       const themeMode = get().themeMode === 'dark' ? 'light' : 'dark'
       localStorage.setItem(THEME_KEY, JSON.stringify(themeMode))
@@ -162,7 +184,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     start: () => {
-      const { spec, keys } = get()
+      const { spec, keys, endpoints } = get()
       controller?.abort()
       controller = new AbortController()
       set({ transcript: [], statuses: {}, round: 0, error: undefined, transit: [], phase: 'running' })
@@ -189,6 +211,7 @@ export const useStore = create<State>((set, get) => {
           },
         },
         controller.signal,
+        endpoints,
       )
     },
   }

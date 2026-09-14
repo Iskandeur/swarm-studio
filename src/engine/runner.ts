@@ -9,7 +9,7 @@
  * never guessing: it draws exactly what the engine did.
  */
 import type { Agent, AgentStatus, SwarmSpec, TranscriptEntry } from '../types.ts'
-import { callProvider, estimateTokens, type ChatMessage } from './providers.ts'
+import { callProvider, estimateTokens, resolveEndpoint, type ChatMessage, type Endpoints } from './providers.ts'
 
 export interface RunnerCallbacks {
   onPhase: (phase: 'running' | 'done' | 'error' | 'stopped', detail?: string) => void
@@ -46,6 +46,7 @@ export async function runSwarm(
   keys: ApiKeys,
   cb: RunnerCallbacks,
   signal: AbortSignal,
+  endpoints: Endpoints = {},
 ): Promise<void> {
   const byId = new Map(spec.agents.map((a) => [a.id, a]))
   const entryIds = resolveEntryIds(spec)
@@ -161,6 +162,7 @@ export async function runSwarm(
         messages,
         temperature: agent.temperature,
         apiKey: keys[agent.provider] ?? '',
+        endpoint: resolveEndpoint(agent.provider, endpoints),
         signal,
         onDelta: (delta) => {
           if (firstDelta) {

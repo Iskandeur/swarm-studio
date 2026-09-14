@@ -3,14 +3,18 @@ import {
   AppBar,
   Box,
   Button,
+  Divider,
   IconButton,
+  ListItemIcon,
+  ListItemText,
   Menu,
   MenuItem,
   Stack,
-  TextField,
   Toolbar,
   Tooltip,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material'
 import HubRoundedIcon from '@mui/icons-material/HubRounded'
 import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded'
@@ -18,24 +22,20 @@ import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded'
+import MoreVertRoundedIcon from '@mui/icons-material/MoreVertRounded'
 import { useStore } from '../store'
 import { PRESETS } from '../presets'
-import type { Topology } from '../types'
-
-const TOPOLOGIES: Array<{ id: Topology; label: string; hint: string }> = [
-  { id: 'broadcast', label: 'Broadcast', hint: 'Every outgoing link carries the message.' },
-  { id: 'round-robin', label: 'Round-robin', hint: 'One outgoing link per turn, rotating.' },
-  { id: 'manager', label: 'Manager', hint: 'Workers answer, then the entry agent speaks again.' },
-]
+import { SwarmSettings } from './SwarmSettings'
 
 export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
+  const theme = useTheme()
+  const compact = useMediaQuery(theme.breakpoints.down('md'))
   const spec = useStore((s) => s.spec)
-  const setSpec = useStore((s) => s.setSpec)
-  const setTopology = useStore((s) => s.setTopology)
   const loadPreset = useStore((s) => s.loadPreset)
   const themeMode = useStore((s) => s.themeMode)
   const toggleTheme = useStore((s) => s.toggleTheme)
-  const [menu, setMenu] = useState<HTMLElement | null>(null)
+  const [presetMenu, setPresetMenu] = useState<HTMLElement | null>(null)
+  const [overflow, setOverflow] = useState<HTMLElement | null>(null)
 
   const exportSpec = () => {
     const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' })
@@ -54,22 +54,30 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
       elevation={0}
       sx={{ borderBottom: '1px solid', borderColor: 'divider', backdropFilter: 'blur(6px)' }}
     >
-      <Toolbar variant="dense" sx={{ gap: 1.5, py: 1 }}>
+      <Toolbar variant="dense" sx={{ gap: { xs: 0.5, md: 1.5 }, py: 1, px: { xs: 1, md: 3 } }}>
         <HubRoundedIcon color="primary" />
-        <Typography variant="h6" sx={{ mr: 1 }}>
-          Swarm Studio
-        </Typography>
+        {!compact && (
+          <Typography variant="h6" sx={{ mr: 1 }}>
+            Swarm Studio
+          </Typography>
+        )}
 
-        <Button color="inherit" onClick={(e) => setMenu(e.currentTarget)} sx={{ opacity: 0.8 }}>
-          {spec.name}
+        <Button
+          color="inherit"
+          onClick={(e) => setPresetMenu(e.currentTarget)}
+          sx={{ opacity: 0.85, minWidth: 0, maxWidth: compact ? 170 : 'none' }}
+        >
+          <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {spec.name}
+          </Box>
         </Button>
-        <Menu anchorEl={menu} open={Boolean(menu)} onClose={() => setMenu(null)}>
+        <Menu anchorEl={presetMenu} open={Boolean(presetMenu)} onClose={() => setPresetMenu(null)}>
           {PRESETS.map((preset) => (
             <MenuItem
               key={preset.name}
               onClick={() => {
                 loadPreset(preset)
-                setMenu(null)
+                setPresetMenu(null)
               }}
             >
               {preset.name}
@@ -79,53 +87,79 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
 
         <Box sx={{ flex: 1 }} />
 
-        <Stack direction="row" spacing={1.5} alignItems="center">
-          <Tooltip title={TOPOLOGIES.find((t) => t.id === spec.topology)?.hint ?? ''}>
-            <TextField
-              select
-              label="Topology"
-              value={spec.topology}
-              onChange={(e) => setTopology(e.target.value as Topology)}
-              sx={{ width: 150 }}
-            >
-              {TOPOLOGIES.map((t) => (
-                <MenuItem key={t.id} value={t.id}>
-                  {t.label}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Tooltip>
-
-          <TextField
-            label="Max rounds"
-            type="number"
-            value={spec.maxRounds}
-            onChange={(e) => setSpec({ maxRounds: Math.max(1, Math.min(24, Number(e.target.value) || 1)) })}
-            sx={{ width: 100 }}
-            inputProps={{ min: 1, max: 24 }}
-          />
-
-          <Tooltip title="Export this swarm as JSON">
-            <IconButton onClick={exportSpec}>
-              <DownloadRoundedIcon />
+        {compact ? (
+          <>
+            <Tooltip title="Providers and keys">
+              <IconButton onClick={onOpenSettings} edge="end">
+                <SettingsRoundedIcon />
+              </IconButton>
+            </Tooltip>
+            <IconButton onClick={(e) => setOverflow(e.currentTarget)} aria-label="more">
+              <MoreVertRoundedIcon />
             </IconButton>
-          </Tooltip>
-          <Tooltip title="API keys">
-            <IconButton onClick={onOpenSettings}>
-              <SettingsRoundedIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title={themeMode === 'dark' ? 'Light mode' : 'Dark mode'}>
-            <IconButton onClick={toggleTheme}>
-              {themeMode === 'dark' ? <LightModeRoundedIcon /> : <DarkModeRoundedIcon />}
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Source on GitHub">
-            <IconButton href="https://github.com/Iskandeur/swarm-studio" target="_blank" rel="noreferrer">
-              <GitHubIcon />
-            </IconButton>
-          </Tooltip>
-        </Stack>
+            <Menu anchorEl={overflow} open={Boolean(overflow)} onClose={() => setOverflow(null)}>
+              <MenuItem
+                onClick={() => {
+                  toggleTheme()
+                  setOverflow(null)
+                }}
+              >
+                <ListItemIcon>
+                  {themeMode === 'dark' ? <LightModeRoundedIcon fontSize="small" /> : <DarkModeRoundedIcon fontSize="small" />}
+                </ListItemIcon>
+                <ListItemText>{themeMode === 'dark' ? 'Light mode' : 'Dark mode'}</ListItemText>
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  exportSpec()
+                  setOverflow(null)
+                }}
+              >
+                <ListItemIcon>
+                  <DownloadRoundedIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Export JSON</ListItemText>
+              </MenuItem>
+              <Divider />
+              <MenuItem
+                component="a"
+                href="https://github.com/Iskandeur/swarm-studio"
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => setOverflow(null)}
+              >
+                <ListItemIcon>
+                  <GitHubIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Source</ListItemText>
+              </MenuItem>
+            </Menu>
+          </>
+        ) : (
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <SwarmSettings />
+            <Tooltip title="Export this swarm as JSON">
+              <IconButton onClick={exportSpec}>
+                <DownloadRoundedIcon />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Providers and keys">
+              <IconButton onClick={onOpenSettings}>
+                <SettingsRoundedIcon />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title={themeMode === 'dark' ? 'Light mode' : 'Dark mode'}>
+              <IconButton onClick={toggleTheme}>
+                {themeMode === 'dark' ? <LightModeRoundedIcon /> : <DarkModeRoundedIcon />}
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Source on GitHub">
+              <IconButton href="https://github.com/Iskandeur/swarm-studio" target="_blank" rel="noreferrer">
+                <GitHubIcon />
+              </IconButton>
+            </Tooltip>
+          </Stack>
+        )}
       </Toolbar>
     </AppBar>
   )

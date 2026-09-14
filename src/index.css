@@ -5,9 +5,20 @@ body,
   margin: 0;
 }
 
-/* The graph owns the scroll; nothing else should bounce. */
 body {
+  /* The graph owns the gestures; the page itself must never rubber-band or scroll. */
   overscroll-behavior: none;
+  overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* iOS zooms the page when a focused input is under 16px. Keep the sheets from jumping. */
+@media (max-width: 899px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
 }
 
 ::-webkit-scrollbar {

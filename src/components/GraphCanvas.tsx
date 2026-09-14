@@ -149,7 +149,12 @@ export function GraphCanvas() {
         fitViewOptions={{ padding: 0.3 }}
         proOptions={{ hideAttribution: true }}
         defaultEdgeOptions={{ type: 'message' }}
-        minZoom={0.25}
+        minZoom={0.2}
+        maxZoom={2}
+        // Generous grab radius so a fingertip can land a connection.
+        connectionRadius={34}
+        panOnDrag
+        zoomOnPinch
       >
         <Background
           variant={BackgroundVariant.Dots}

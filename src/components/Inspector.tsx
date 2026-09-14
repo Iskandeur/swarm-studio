@@ -17,7 +17,7 @@ import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import { useStore } from '../store'
-import { PROVIDERS, providerInfo } from '../engine/providers'
+import { PROVIDERS, providerInfo, resolveEndpoint } from '../engine/providers'
 import { resolveEntryIds } from '../engine/runner'
 import { agentColor } from '../theme'
 import type { ProviderId } from '../types'
@@ -32,12 +32,17 @@ export function Inspector() {
   const removeAgent = useStore((s) => s.removeAgent)
   const toggleEntry = useStore((s) => s.toggleEntry)
   const keys = useStore((s) => s.keys)
+  const endpoints = useStore((s) => s.endpoints)
+  const discoveredModels = useStore((s) => s.discoveredModels)
   const themeMode = useStore((s) => s.themeMode)
 
   const agent = spec.agents.find((a) => a.id === selectedId)
   const entryIds = resolveEntryIds(spec)
   const info = agent ? providerInfo(agent.provider) : undefined
   const missingKey = agent && agent.provider !== 'mock' && !keys[agent.provider]
+  const missingEndpoint = agent ? !resolveEndpoint(agent.provider, endpoints) && agent.provider !== 'mock' : false
+  // Models the endpoint actually reported win over the hardcoded suggestions.
+  const modelOptions = agent ? discoveredModels[agent.provider] ?? info?.models ?? [] : []
 
   return (
     <Stack sx={{ height: '100%', overflow: 'hidden' }}>
@@ -126,7 +131,7 @@ export function Inspector() {
           <Autocomplete
             freeSolo
             size="small"
-            options={info?.models ?? []}
+            options={modelOptions}
             value={agent.model}
             onChange={(_, value) => updateAgent(agent.id, { model: value ?? '' })}
             onInputChange={(_, value) => updateAgent(agent.id, { model: value })}
@@ -134,8 +139,16 @@ export function Inspector() {
               <TextField
                 {...params}
                 label="Model"
-                helperText={missingKey ? `No ${info?.label} key set — open Settings` : 'Free text: type any model id'}
-                error={Boolean(missingKey)}
+                helperText={
+                  missingEndpoint
+                    ? 'No endpoint URL for this provider — open Providers'
+                    : missingKey
+                      ? `No ${info?.label} key set — open Providers`
+                      : modelOptions.length > 0
+                        ? `${modelOptions.length} suggestions, or type any model id`
+                        : 'Free text: type any model id'
+                }
+                error={Boolean(missingKey || missingEndpoint)}
               />
             )}
           />

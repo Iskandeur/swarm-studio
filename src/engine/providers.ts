@@ -18,6 +18,8 @@ export interface ChatRequest {
   messages: ChatMessage[]
   temperature: number
   apiKey: string
+  /** Full chat endpoint URL. Defaults per provider; required for `custom`. */
+  endpoint: string
   signal: AbortSignal
   /** Called with each chunk of text as it arrives. */
   onDelta: (text: string) => void
@@ -37,6 +39,9 @@ export interface ProviderInfo {
   keyUrl?: string
   /** Suggestions only. The model field is free text, so a new release needs no code change. */
   models: string[]
+  /** Whether the endpoint URL is the user's to supply (no sensible default exists). */
+  needsEndpoint?: boolean
+  hint?: string
 }
 
 export const PROVIDERS: ProviderInfo[] = [
@@ -67,10 +72,89 @@ export const PROVIDERS: ProviderInfo[] = [
     keyUrl: 'https://openrouter.ai/keys',
     models: [],
   },
+  {
+    id: 'custom',
+    label: 'Custom (OpenAI-compatible)',
+    keyLabel: 'API key',
+    models: [],
+    needsEndpoint: true,
+    hint: 'Any gateway that speaks /chat/completions: vLLM, Ollama, LM Studio, LiteLLM, a company gateway…',
+  },
 ]
 
 export function providerInfo(id: ProviderId): ProviderInfo {
   return PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[0]
+}
+
+/**
+ * Where each provider is called. Every one of them is overridable, so pointing an agent at a
+ * self-hosted or corporate gateway never needs a code change — the URL is yours, typed at runtime
+ * and kept in this browser.
+ */
+export const DEFAULT_ENDPOINTS: Record<ProviderId, string> = {
+  mock: '',
+  anthropic: 'https://api.anthropic.com/v1/messages',
+  openai: 'https://api.openai.com/v1/chat/completions',
+  openrouter: 'https://openrouter.ai/api/v1/chat/completions',
+  custom: '',
+}
+
+export type Endpoints = Partial<Record<ProviderId, string>>
+
+export function resolveEndpoint(provider: ProviderId, endpoints: Endpoints = {}): string {
+  return (endpoints[provider] ?? '').trim() || DEFAULT_ENDPOINTS[provider]
+}
+
+/** `…/v1/chat/completions` → `…/v1/models`. Used to offer a model list instead of blind typing. */
+export function modelsUrlFrom(chatUrl: string): string {
+  const trimmed = chatUrl.trim().replace(/\/+$/, '')
+  if (/\/chat\/completions$/.test(trimmed)) return trimmed.replace(/\/chat\/completions$/, '/models')
+  if (/\/messages$/.test(trimmed)) return trimmed.replace(/\/messages$/, '/models')
+  return trimmed + '/models'
+}
+
+/**
+ * Pull model ids out of a `/models` response. Three shapes are accepted because gateways disagree:
+ * OpenAI's `{data:[{id}]}`, a bare `[{id}]`, and the "list of upstreams" shape some relays use,
+ * `[{host, models:[{id}]}]`.
+ */
+export function parseModelList(payload: unknown): string[] {
+  const ids = new Set<string>()
+  const take = (entry: unknown) => {
+    if (typeof entry === 'string') return ids.add(entry)
+    if (entry && typeof entry === 'object') {
+      const record = entry as Record<string, unknown>
+      const id = record.id ?? record.name ?? record.model
+      if (typeof id === 'string' && id) ids.add(id)
+      if (Array.isArray(record.models)) record.models.forEach(take)
+    }
+  }
+  if (Array.isArray(payload)) payload.forEach(take)
+  else if (payload && typeof payload === 'object') {
+    const record = payload as Record<string, unknown>
+    for (const key of ['data', 'models', 'result']) {
+      if (Array.isArray(record[key])) record[key].forEach(take)
+    }
+  }
+  return [...ids].sort()
+}
+
+/** Lists the models an endpoint serves. Doubles as the "does my key and URL work?" check. */
+export async function listModels(
+  provider: ProviderId,
+  opts: { endpoint: string; apiKey: string; signal?: AbortSignal },
+): Promise<string[]> {
+  const headers: Record<string, string> = { accept: 'application/json' }
+  if (provider === 'anthropic') {
+    headers['x-api-key'] = opts.apiKey
+    headers['anthropic-version'] = '2023-06-01'
+    headers['anthropic-dangerous-direct-browser-access'] = 'true'
+  } else if (opts.apiKey) {
+    headers.authorization = `Bearer ${opts.apiKey}`
+  }
+  const res = await fetch(modelsUrlFrom(opts.endpoint), { headers, signal: opts.signal })
+  if (!res.ok) await failure(res)
+  return parseModelList(await res.json())
 }
 
 /** A rough token count, good enough for a live gauge. Not a billing figure. */
@@ -109,9 +193,10 @@ async function failure(res: Response): Promise<never> {
   throw new Error(`HTTP ${res.status} — ${detail || res.statusText}`)
 }
 
-/** OpenAI-compatible /chat/completions streaming, shared by OpenAI and OpenRouter. */
-async function chatCompletions(url: string, req: ChatRequest, extraHeaders: Record<string, string> = {}): Promise<ChatResult> {
-  const res = await fetch(url, {
+/** OpenAI-compatible /chat/completions streaming: OpenAI, OpenRouter and any custom gateway. */
+async function chatCompletions(req: ChatRequest, extraHeaders: Record<string, string> = {}): Promise<ChatResult> {
+  if (!req.endpoint) throw new Error('no endpoint URL set for this provider — open Settings')
+  const res = await fetch(req.endpoint, {
     method: 'POST',
     signal: req.signal,
     headers: {
@@ -159,7 +244,7 @@ async function chatCompletions(url: string, req: ChatRequest, extraHeaders: Reco
 
 /** Anthropic Messages API, streamed straight from the browser. */
 async function anthropic(req: ChatRequest): Promise<ChatResult> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch(req.endpoint, {
     method: 'POST',
     signal: req.signal,
     headers: {
@@ -240,9 +325,10 @@ export function callProvider(provider: ProviderId, req: ChatRequest): Promise<Ch
     case 'anthropic':
       return anthropic(req)
     case 'openai':
-      return chatCompletions('https://api.openai.com/v1/chat/completions', req)
+    case 'custom':
+      return chatCompletions(req)
     case 'openrouter':
-      return chatCompletions('https://openrouter.ai/api/v1/chat/completions', req, {
+      return chatCompletions(req, {
         'HTTP-Referer': window.location.origin,
         'X-Title': 'Swarm Studio',
       })

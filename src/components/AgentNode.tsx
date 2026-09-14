@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
-import { Box, Chip, Paper, Typography, useTheme } from '@mui/material'
+import { Box, Chip, Paper, Typography, useMediaQuery, useTheme } from '@mui/material'
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded'
 import CheckRoundedIcon from '@mui/icons-material/CheckRounded'
@@ -34,6 +34,9 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const mode = theme.palette.mode as 'light' | 'dark'
   const color = agentColor(data.hue, mode)
   const busy = data.status === 'thinking' || data.status === 'speaking'
+  // A fingertip is not a mouse pointer: the connect dots need to be grabbable.
+  const touch = useMediaQuery('(pointer: coarse)')
+  const handleSize = touch ? 18 : 10
 
   return (
     <Paper
@@ -141,16 +144,16 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         {data.live ? `…${data.live}` : STATUS_LABEL[data.status]}
       </Typography>
 
-      <Handle type="target" position={Position.Left} style={handleStyle(color)} />
-      <Handle type="source" position={Position.Right} style={handleStyle(color)} />
+      <Handle type="target" position={Position.Left} style={handleStyle(color, handleSize)} />
+      <Handle type="source" position={Position.Right} style={handleStyle(color, handleSize)} />
     </Paper>
   )
 }
 
-function handleStyle(color: string) {
+function handleStyle(color: string, size: number) {
   return {
-    width: 10,
-    height: 10,
+    width: size,
+    height: size,
     border: '2px solid',
     borderColor: color,
     background: 'var(--swarm-handle-bg)',

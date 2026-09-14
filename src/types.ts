@@ -1,6 +1,6 @@
 /** Domain model for a swarm: who the agents are, and who is allowed to speak to whom. */
 
-export type ProviderId = 'mock' | 'openai' | 'anthropic' | 'openrouter'
+export type ProviderId = 'mock' | 'openai' | 'anthropic' | 'openrouter' | 'custom'
 
 /** How a speaking turn is handed to the agents an agent points at. */
 export type Topology =

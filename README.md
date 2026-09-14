@@ -28,6 +28,7 @@ order. This app makes the shape the primary object, and the run a thing you can 
 | **Pick the entry points** | Mark which agents receive the task. With none marked, every agent that has no incoming link starts the run. |
 | **Watch it run** | Per-node status and a live tail of the text being produced, an animated packet on every link that carries a message, a colour-matched transcript, round and token counters. |
 | **Export** | Download the swarm as JSON. |
+| **Use it on a phone** | Below 900px the graph keeps the whole screen and the three panels become bottom sheets, with Run always one tap away. Pinch to zoom, drag to pan, and the connect dots grow on touch pointers. |
 
 ## Providers
 
@@ -37,11 +38,20 @@ order. This app makes the shape the primary object, and the run a thing you can 
 | **Anthropic** | yes | Messages API, streamed straight from the browser. |
 | **OpenAI** | yes | `/chat/completions`, streamed. |
 | **OpenRouter** | yes | `/chat/completions`, streamed. |
+| **Custom** | usually | Any endpoint that speaks OpenAI's `/chat/completions`: vLLM, Ollama, LM Studio, LiteLLM, a company gateway. You supply the URL. |
 
-Keys live in this browser's local storage and go straight to the provider — there is no server in
-this project to pass them through. Browser-to-provider calls depend on the provider allowing
-cross-origin requests; if one refuses, put your own proxy in front of it. Use a key with a spend
-limit.
+**Every** provider's endpoint URL is overridable in Providers, so routing an agent through a mirror,
+a gateway or a proxy never needs a code change. *Test and list models* calls the endpoint's `/models`
+and fills the model dropdown, which doubles as a "is my URL and key actually working?" check.
+
+Keys and URLs live in this browser's local storage and go straight to the endpoint — there is no
+server in this project to pass them through. Use a key with a spend limit.
+
+⚠️ **CORS decides what a browser-only app can reach.** The call only works if the endpoint returns
+`Access-Control-Allow-Origin` for your origin. Internal gateways commonly allow `localhost` and
+nothing else, in which case use `npm run dev` locally rather than the published site, or point the
+Endpoint URL at a proxy of your own. A *Test* that fails with no detail at all is nearly always
+this — the browser refuses the response before any status code reaches the page.
 
 ## Run it
 
