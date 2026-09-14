@@ -1,5 +1,6 @@
 import { Box, Button, Chip, IconButton, Paper, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
+import PauseRoundedIcon from '@mui/icons-material/PauseRounded'
 import StopRoundedIcon from '@mui/icons-material/StopRounded'
 import RestartAltRoundedIcon from '@mui/icons-material/RestartAltRounded'
 import { useStore, useTotals } from '../store'
@@ -43,19 +44,41 @@ export function RunBar({ layout = 'bar' }: { layout?: 'bar' | 'sheet' }) {
   const phase = useStore((s) => s.phase)
   const start = useStore((s) => s.start)
   const stop = useStore((s) => s.stop)
+  const pause = useStore((s) => s.pause)
+  const resume = useStore((s) => s.resume)
   const reset = useStore((s) => s.reset)
   const running = phase === 'running'
   const sheet = layout === 'sheet'
 
-  const runButton = running ? (
-    <Button variant="contained" color="error" startIcon={<StopRoundedIcon />} onClick={stop} fullWidth>
-      Stop
-    </Button>
-  ) : (
-    <Button variant="contained" startIcon={<PlayArrowRoundedIcon />} onClick={start} fullWidth>
-      Run swarm
-    </Button>
-  )
+  const runButton =
+    phase === 'paused' ? (
+      <Button variant="contained" startIcon={<PlayArrowRoundedIcon />} onClick={resume} fullWidth>
+        Resume
+      </Button>
+    ) : running ? (
+      <Button variant="contained" color="error" startIcon={<StopRoundedIcon />} onClick={stop} fullWidth>
+        Stop
+      </Button>
+    ) : (
+      <Button variant="contained" startIcon={<PlayArrowRoundedIcon />} onClick={start} fullWidth>
+        Run swarm
+      </Button>
+    )
+
+  /** Pause parks the loop at the next round boundary; Stop ends it. Two different buttons. */
+  const pauseButton = running ? (
+    <Tooltip title="Pause after the current round">
+      <IconButton onClick={pause} aria-label="Pause the run">
+        <PauseRoundedIcon />
+      </IconButton>
+    </Tooltip>
+  ) : phase === 'paused' ? (
+    <Tooltip title="Stop the run">
+      <IconButton onClick={stop} aria-label="Stop the run" color="error">
+        <StopRoundedIcon />
+      </IconButton>
+    </Tooltip>
+  ) : null
 
   const task = (
     <TextField
@@ -76,6 +99,7 @@ export function RunBar({ layout = 'bar' }: { layout?: 'bar' | 'sheet' }) {
         <SwarmSettings direction="column" />
         <Stack direction="row" spacing={1}>
           {runButton}
+          {pauseButton}
           <Tooltip title="Clear the run">
             <IconButton onClick={reset} disabled={running}>
               <RestartAltRoundedIcon />
@@ -105,6 +129,7 @@ export function RunBar({ layout = 'bar' }: { layout?: 'bar' | 'sheet' }) {
       <Stack spacing={0.75} sx={{ minWidth: 190 }}>
         <Stack direction="row" spacing={0.75}>
           {runButton}
+          {pauseButton}
           <Tooltip title="Clear the run">
             <IconButton onClick={reset} disabled={running}>
               <RestartAltRoundedIcon />

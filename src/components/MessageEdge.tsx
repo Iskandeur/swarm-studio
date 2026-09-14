@@ -5,8 +5,13 @@ import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import { agentColor } from '../theme'
 import { useStore } from '../store'
 
-export type MessageEdgeData = { hue: number; active: boolean; label: string }
+export type MessageEdgeData = { hue: number; active: boolean; reversed: boolean; label: string }
 export type MessageFlowEdge = Edge<MessageEdgeData, 'message'>
+
+/** SVG has no "play backwards": walking the keyPoints from 1 to 0 is how you reverse a motion. */
+function motionDirection(reversed: boolean) {
+  return reversed ? { keyPoints: '1;0', keyTimes: '0;1', calcMode: 'linear' as const } : {}
+}
 
 /**
  * A directed "can speak to" link. When a message actually travels on it, a packet slides along the
@@ -34,6 +39,7 @@ export function MessageEdge({
   const hue = data?.hue ?? 262
   const color = agentColor(hue, mode)
   const active = Boolean(data?.active)
+  const reversed = Boolean(data?.reversed)
   const showDelete = hovered || Boolean(selected)
 
   const [path, labelX, labelY] = getBezierPath({
@@ -73,11 +79,14 @@ export function MessageEdge({
       {active && (
         <>
           <path d={path} fill="none" stroke={color} strokeWidth={7} opacity={0.16} />
+          {/* keyPoints 1;0 walks the same curve backwards, for a message climbing back up its link.
+              Without it, a manager-mode reply animated exactly like the delegation that preceded it,
+              so the picture said the opposite of the transcript. */}
           <circle r={5.5} fill={color}>
-            <animateMotion dur="0.85s" repeatCount="indefinite" path={path} />
+            <animateMotion dur="0.85s" repeatCount="indefinite" path={path} {...motionDirection(reversed)} />
           </circle>
           <circle r={11} fill={color} opacity={0.22}>
-            <animateMotion dur="0.85s" repeatCount="indefinite" path={path} />
+            <animateMotion dur="0.85s" repeatCount="indefinite" path={path} {...motionDirection(reversed)} />
           </circle>
         </>
       )}

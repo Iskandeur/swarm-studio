@@ -45,7 +45,10 @@ export type AgentStatus = 'idle' | 'queued' | 'thinking' | 'speaking' | 'done' |
 export interface TranscriptEntry {
   id: string
   round: number
+  /** The speaker. For a human injection this is the RECIPIENT, and `kind` is `human`. */
   agentId: string
+  /** `human` marks a message you typed into the swarm rather than one an agent produced. */
+  kind?: 'agent' | 'human'
   /** Agent ids this message was handed to. Empty for a leaf. */
   to: string[]
   text: string

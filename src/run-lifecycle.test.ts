@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict'
 import { test, beforeEach, afterEach } from 'vitest'
 import { useStore } from './store'
+import { PRESETS } from './presets'
 import type { SwarmSpec } from './types'
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -53,6 +54,27 @@ test('Stop keeps the words that already arrived', async () => {
     after.text.startsWith(mid),
     `the partial answer must survive a Stop, got ${JSON.stringify(after.text.slice(0, 40))}`,
   )
+})
+
+test('switching preset mid-run leaves no message signed by an agent that no longer exists', async () => {
+  // Found by an adversarial probe: loading a preset reset the spec and the transcript but left the
+  // old runner alive, so it kept appending messages from agents the new swarm had never heard of.
+  useStore.getState().start()
+  await wait(200)
+  assert.equal(useStore.getState().phase, 'running')
+
+  useStore.getState().loadPreset(PRESETS[2])
+  await wait(1200)
+
+  const state = useStore.getState()
+  const known = new Set(state.spec.agents.map((a) => a.id))
+  const ghosts = state.transcript.filter((e) => !known.has(e.agentId))
+  assert.deepEqual(
+    [...new Set(ghosts.map((g) => g.agentId))],
+    [],
+    'no ghost authors in the transcript',
+  )
+  assert.notEqual(state.phase, 'running', 'the old run is not still marked running')
 })
 
 test('a restart is not polluted by the runner it replaced', async () => {

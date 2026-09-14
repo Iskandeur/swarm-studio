@@ -88,6 +88,22 @@ export function providerInfo(id: ProviderId): ProviderInfo {
   return PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[0]
 }
 
+/** The demo provider's model ids, which mean nothing to any real endpoint. */
+const DEMO_MODELS = new Set(providerInfo('mock').models)
+
+/**
+ * The model to carry over when an agent changes provider.
+ *
+ * Switching Demo → OpenAI used to keep `demo-fast`, and the first real call 404'd on a model id
+ * that only ever existed locally. An empty string is better: the field then says "no model set" in
+ * red instead of looking configured and failing at run time.
+ */
+export function modelForProvider(nextProvider: ProviderId, currentModel: string): string {
+  const suggested = providerInfo(nextProvider).models[0]
+  if (suggested) return suggested
+  return DEMO_MODELS.has(currentModel) ? '' : currentModel
+}
+
 /**
  * Where each provider is called. Every one of them is overridable, so pointing an agent at a
  * self-hosted or corporate gateway never needs a code change — the URL is yours, typed at runtime
@@ -168,7 +184,7 @@ export function estimateTokens(text: string): number {
 }
 
 /** Reads an SSE body line by line and yields the payload of each `data:` line. */
-async function* sseLines(res: Response): AsyncGenerator<string> {
+async function* sseLines(res: Response, onRaw?: (chunk: string) => void): AsyncGenerator<string> {
   const reader = res.body?.getReader()
   if (!reader) throw new Error('response has no body to stream')
   const decoder = new TextDecoder()
@@ -176,7 +192,11 @@ async function* sseLines(res: Response): AsyncGenerator<string> {
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
-    buffer += decoder.decode(value, { stream: true })
+    const decoded = decoder.decode(value, { stream: true })
+    // Kept for the error path: once the body is read it cannot be read again, and a 200 carrying a
+    // JSON error instead of a stream has to be quotable.
+    onRaw?.(decoded)
+    buffer += decoded
     const lines = buffer.split('\n')
     buffer = lines.pop() ?? ''
     for (const line of lines) {
@@ -267,7 +287,11 @@ async function chatCompletions(
   let text = ''
   let tokensIn = 0
   let tokensOut = 0
-  for await (const data of sseLines(res)) {
+  /** Did this look like a stream at all? A 200 carrying a JSON error has no `data:` line. */
+  let sawStream = false
+  let raw = ''
+  for await (const data of sseLines(res, (chunk) => (raw += chunk))) {
+    sawStream = true
     if (data === '[DONE]') break
     let event: any
     try {
@@ -284,7 +308,13 @@ async function chatCompletions(
       tokensIn = event.usage.prompt_tokens ?? tokensIn
       tokensOut = event.usage.completion_tokens ?? tokensOut
     }
+    if (event?.error) throw new Error(String(event.error?.message ?? event.error))
   }
+
+  // A 200 that was never a stream is an error wearing a success code. Reporting it as an empty
+  // message let a misconfigured endpoint look like a laconic model.
+  if (!sawStream) failureFromBody(res, raw || 'the endpoint answered 200 but sent no stream')
+
   return {
     text,
     tokensIn: tokensIn || estimateTokens(req.system + req.messages.map((m) => m.content).join('')),

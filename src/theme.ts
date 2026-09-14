@@ -37,9 +37,16 @@ export function buildTheme(mode: 'light' | 'dark'): Theme {
   })
 }
 
-/** Per-agent colour, derived from its hue so node, edge and transcript always agree. */
+/**
+ * Per-agent colour, derived from its hue so node, edge and transcript always agree.
+ *
+ * ⚠️ The lightness is not a taste decision. These colours carry the speaker's name in the
+ * transcript, so they are text, so they owe 4.5:1 against the background. Light mode was at
+ * 44% lightness and measured **2.53:1** on the green hue — decoration standing in for information.
+ * `src/theme.test.ts` measures all eight hues in both modes; do not raise these without re-running it.
+ */
 export function agentColor(hue: number, mode: 'light' | 'dark'): string {
-  return mode === 'dark' ? `hsl(${hue} 72% 72%)` : `hsl(${hue} 58% 44%)`
+  return mode === 'dark' ? `hsl(${hue} 72% 72%)` : `hsl(${hue} 70% 29%)`
 }
 
 export function agentGlow(hue: number, alpha: number): string {

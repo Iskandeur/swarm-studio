@@ -19,6 +19,7 @@ import UnfoldMoreRoundedIcon from '@mui/icons-material/UnfoldMoreRounded'
 import { useStore } from '../store'
 import { agentColor, agentGlow } from '../theme'
 import { RichText } from './RichText'
+import { Composer } from './Composer'
 import type { TranscriptEntry } from '../types'
 
 /** Longer than this and a message is folded: the panel is for reading, not for scrolling past. */
@@ -135,6 +136,9 @@ export function TranscriptPanel() {
                 <Message
                   entry={entry}
                   name={nameOf(entry.agentId)}
+                  // A canned demo answer must say so, or a first-time reader takes "the agents
+                  // ignored my task" for the product being broken.
+                  demo={agents.find((a) => a.id === entry.agentId)?.provider === 'mock'}
                   hue={hueOf(entry.agentId)}
                   to={entry.to.map(nameOf)}
                   mode={themeMode}
@@ -153,6 +157,8 @@ export function TranscriptPanel() {
         )}
         <div ref={bottom} />
       </Box>
+
+      <Composer />
     </Stack>
   )
 }
@@ -160,6 +166,7 @@ export function TranscriptPanel() {
 function Message({
   entry,
   name,
+  demo,
   hue,
   to,
   mode,
@@ -168,6 +175,7 @@ function Message({
 }: {
   entry: TranscriptEntry
   name: string
+  demo: boolean
   hue: number
   to: string[]
   mode: 'light' | 'dark'
@@ -195,42 +203,61 @@ function Message({
     )
   }
 
+  const human = entry.kind === 'human'
+
   return (
     <Paper
       elevation={0}
       sx={{
         p: 1.5,
-        borderLeft: '3px solid',
-        borderLeftColor: color,
-        bgcolor: agentGlow(hue, mode === 'dark' ? 0.07 : 0.05),
+        // A human message is visibly not an agent's: dashed border, no agent tint, so scanning the
+        // transcript never confuses what you said with what the swarm produced.
+        border: human ? '1px dashed' : undefined,
+        borderColor: human ? 'text.disabled' : undefined,
+        borderLeft: human ? undefined : '3px solid',
+        borderLeftColor: human ? undefined : color,
+        bgcolor: human ? 'transparent' : agentGlow(hue, mode === 'dark' ? 0.07 : 0.05),
       }}
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75, flexWrap: 'wrap' }}>
-        <Typography
-          variant="caption"
-          onClick={onSelectAgent}
-          sx={{ fontWeight: 700, color, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
-        >
-          {name}
-        </Typography>
+        {human ? (
+          <Typography variant="caption" sx={{ fontWeight: 700, opacity: 0.8 }}>
+            You
+          </Typography>
+        ) : (
+          <Typography
+            variant="caption"
+            onClick={onSelectAgent}
+            sx={{ fontWeight: 700, color, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+          >
+            {name}
+          </Typography>
+        )}
         {to.length > 0 && (
           <>
             <ArrowForwardRoundedIcon sx={{ fontSize: 13, opacity: 0.5 }} />
-            <Typography variant="caption" sx={{ opacity: 0.65 }}>
+            <Typography variant="caption" sx={{ opacity: 0.65, color: human ? color : undefined }}>
               {to.join(', ')}
             </Typography>
           </>
         )}
-        {to.length === 0 && entry.status === 'complete' && (
+        {!human && to.length === 0 && entry.status === 'complete' && (
           <Chip size="small" label="swarm output" sx={{ height: 17, fontSize: 10 }} />
+        )}
+        {demo && !human && (
+          <Tooltip title="Canned local text from the demo provider — not a model, and it does not read your task">
+            <Chip size="small" label="demo" variant="outlined" sx={{ height: 17, fontSize: 10, opacity: 0.8 }} />
+          </Tooltip>
         )}
         {entry.status === 'stopped' && (
           <Chip size="small" label="stopped" variant="outlined" sx={{ height: 17, fontSize: 10 }} />
         )}
         <Box sx={{ flex: 1 }} />
-        <Typography variant="caption" sx={{ opacity: 0.4, fontFamily: '"Roboto Mono", monospace', fontSize: 10.5 }}>
-          {entry.tokensIn}↓ {entry.tokensOut}↑{seconds !== undefined ? ` · ${seconds.toFixed(1)}s` : ''}
-        </Typography>
+        {!human && (
+          <Typography variant="caption" sx={{ opacity: 0.4, fontFamily: '"Roboto Mono", monospace', fontSize: 10.5 }}>
+            {entry.tokensIn}↓ {entry.tokensOut}↑{seconds !== undefined ? ` · ${seconds.toFixed(1)}s` : ''}
+          </Typography>
+        )}
         <Tooltip title={copied ? 'Copied' : 'Copy this message'}>
           <IconButton size="small" onClick={copy} aria-label="Copy this message" sx={{ p: 0.25 }}>
             {copied ? (

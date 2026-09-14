@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict'
 import { test } from 'vitest'
-import { resolveEntryIds, runSwarm, type RunnerCallbacks } from './runner.ts'
+import { resolveEntryIds, runSwarm, type RunnerCallbacks, type TransitPacket } from './runner.ts'
 import type { Agent, SwarmSpec, Topology, TranscriptEntry } from '../types.ts'
 
 function agent(id: string, overrides: Partial<Agent> = {}): Agent {
@@ -42,7 +42,7 @@ function spec(partial: Partial<SwarmSpec> = {}): SwarmSpec {
 /** Runs a swarm to completion and returns the transcript plus the links that lit up. */
 async function collect(s: SwarmSpec) {
   const entries = new Map<string, TranscriptEntry>()
-  const transit: string[] = []
+  const transit: TransitPacket[] = []
   let phase = ''
   let error: string | undefined
   const cb: RunnerCallbacks = {
@@ -133,6 +133,17 @@ test('manager mode sends workers down then collects them back up', async () => {
     transcript.filter((e) => e.round === 3).map((e) => e.agentId),
     ['a'],
   )
+})
+
+test('a manager-mode reply is marked as travelling backwards along its link', async () => {
+  // Found by the adversarial review: the reply round reused the same link ids as the delegation
+  // round, so the animation drew manager→worker both times while the transcript said the opposite.
+  const { transit } = await collect(spec({ topology: 'manager', maxRounds: 2 }))
+
+  const down = transit.filter((p) => !p.reversed).map((p) => p.id).sort()
+  const up = transit.filter((p) => p.reversed).map((p) => p.id).sort()
+  assert.deepEqual(down, ['ab', 'ac'], 'round 1 delegates along the links as drawn')
+  assert.deepEqual(up, ['ab', 'ac'], 'round 2 climbs the same links, and says so')
 })
 
 test('a leaf ends the run before maxRounds', async () => {

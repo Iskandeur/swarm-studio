@@ -83,14 +83,21 @@ export function GraphCanvas({ onAgentOpen }: { onAgentOpen?: () => void } = {}) 
         const from = spec.agents.find((a) => a.id === link.source)
         const to = spec.agents.find((a) => a.id === link.target)
         const hue = from?.hue ?? 262
-        const active = transit.includes(link.id)
+        const packet = transit.find((p) => p.id === link.id)
+        const active = Boolean(packet)
         return {
           id: link.id,
           source: link.source,
           target: link.target,
           type: 'message' as const,
           selected: link.id === selectedEdgeId,
-          data: { hue, active, label: `${from?.name ?? link.source} → ${to?.name ?? link.target}` },
+          data: {
+            hue,
+            active,
+            // A manager-mode reply climbs back up its own downward link.
+            reversed: Boolean(packet?.reversed),
+            label: `${from?.name ?? link.source} → ${to?.name ?? link.target}`,
+          },
           markerEnd: {
             type: MarkerType.ArrowClosed,
             width: 16,

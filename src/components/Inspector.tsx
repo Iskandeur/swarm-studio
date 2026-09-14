@@ -22,7 +22,7 @@ import LinkOffRoundedIcon from '@mui/icons-material/LinkOffRounded'
 import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded'
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
 import { useStore } from '../store'
-import { PROVIDERS, providerInfo, resolveEndpoint } from '../engine/providers'
+import { modelForProvider, PROVIDERS, providerInfo, resolveEndpoint } from '../engine/providers'
 import { resolveEntryIds } from '../engine/runner'
 import { agentColor } from '../theme'
 import type { ProviderId } from '../types'
@@ -173,8 +173,11 @@ export function Inspector() {
                 value=""
                 onChange={(e) => {
                   const provider = e.target.value as ProviderId
-                  const suggested = providerInfo(provider).models[0]
-                  applyToAgents(multiIds, { provider, ...(suggested ? { model: suggested } : {}) })
+                  // Per agent, because each one is carrying a different model into the switch.
+                  for (const id of multiIds) {
+                    const current = spec.agents.find((a) => a.id === id)
+                    if (current) applyToAgents([id], { provider, model: modelForProvider(provider, current.model) })
+                  }
                 }}
                 fullWidth
               >
@@ -252,8 +255,7 @@ export function Inspector() {
             value={agent.provider}
             onChange={(e) => {
               const provider = e.target.value as ProviderId
-              const suggested = providerInfo(provider).models[0]
-              updateAgent(agent.id, { provider, ...(suggested ? { model: suggested } : {}) })
+              updateAgent(agent.id, { provider, model: modelForProvider(provider, agent.model) })
             }}
             fullWidth
           >
@@ -276,15 +278,17 @@ export function Inspector() {
                 {...params}
                 label="Model"
                 helperText={
-                  missingEndpoint
-                    ? 'No endpoint URL for this provider — open Providers'
-                    : missingKey
+                  agent.model.trim() === ''
+                    ? 'No model set — this run would fail'
+                    : missingEndpoint
+                      ? 'No endpoint URL for this provider — open Providers'
+                      : missingKey
                       ? `No ${info?.label} key set — open Providers`
                       : modelOptions.length > 0
                         ? `${modelOptions.length} suggestions, or type any model id`
                         : 'Free text: type any model id'
                 }
-                error={Boolean(missingKey || missingEndpoint)}
+                error={Boolean(missingKey || missingEndpoint || agent.model.trim() === '')}
               />
             )}
           />

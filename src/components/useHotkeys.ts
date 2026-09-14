@@ -8,7 +8,7 @@ export interface Shortcut {
 
 /** Shown in the help dialog, and the single source of truth for what is actually bound below. */
 export const SHORTCUTS: Shortcut[] = [
-  { keys: 'Delete / Backspace', what: 'Delete the selected agent' },
+  { keys: 'Delete / Backspace', what: 'Delete the selected agent (never the ticked ones)' },
   { keys: 'Ctrl/⌘ + Z', what: 'Undo' },
   { keys: 'Ctrl/⌘ + Shift + Z', what: 'Redo' },
   { keys: 'Ctrl/⌘ + Enter', what: 'Run the swarm, or stop it' },
@@ -67,10 +67,11 @@ export function useHotkeys({ onHelp }: { onHelp: () => void }) {
       if (mod) return
 
       if (event.key === 'Delete' || event.key === 'Backspace') {
-        if (store.multiIds.length > 0) {
-          event.preventDefault()
-          store.removeAgents(store.multiIds)
-        } else if (store.selectedId) {
+        // ⚠️ Deliberately only the ONE selected agent, never the bulk selection.
+        // Ctrl+A is muscle memory for "select all text"; here it ticks every agent, and if Delete
+        // then honoured that tick, the next Backspace would wipe the entire swarm. Bulk deletion
+        // stays an explicit button that says how many it will remove.
+        if (store.selectedId) {
           event.preventDefault()
           store.removeAgent(store.selectedId)
         }

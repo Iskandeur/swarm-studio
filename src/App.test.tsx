@@ -53,7 +53,24 @@ test('running the demo swarm streams a message into the transcript', async () =>
 
   fireEvent.click(screen.getByRole('button', { name: /run swarm/i }))
   await waitFor(() => assert.ok(screen.getByText(/round 1/i)), { timeout: 6000 })
-  await waitFor(() => assert.ok(screen.getByRole('button', { name: /stop/i })))
+  // `^stop$` is the run bar's button; the composer has its own "Stop the run" icon, so a loose
+  // /stop/i now matches two and throws.
+  await waitFor(() => assert.ok(screen.getByRole('button', { name: /^stop$/i })))
+  assert.ok(screen.getByRole('button', { name: /pause the run/i }), 'a run can be paused')
+})
+
+test('at phone width the transcript sheet can pause and stop the run on its own', async () => {
+  // The sheets are modal, so the bottom bar is unreachable while reading the transcript. Without
+  // controls in the sheet, a running swarm could not be stopped from the panel you were looking at.
+  setViewport(390)
+  render(<App />)
+
+  fireEvent.click(screen.getByRole('button', { name: /^run$/i }))
+  fireEvent.click(screen.getByRole('button', { name: /log/i }))
+
+  await waitFor(() => assert.ok(screen.getByRole('button', { name: /pause the run/i })))
+  assert.ok(screen.getByRole('button', { name: /stop the run/i }))
+  assert.ok(screen.getByLabelText(/which agent receives your message/i), 'and you can talk to an agent')
 })
 
 /**

@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import type { Agent, AgentStatus, Link, ProviderId, RunPhase, SwarmSpec, Topology, TranscriptEntry } from './types'
 import { DEFAULT_SPEC } from './presets'
-import { runSwarm } from './engine/runner'
+import { runSwarm, type TransitPacket } from './engine/runner'
+import { createRunSession, type RunSession } from './engine/session'
 
 const SPEC_KEY = 'swarm-studio.spec.v1'
 const KEYS_KEY = 'swarm-studio.keys.v1'
@@ -70,8 +71,8 @@ interface State {
   error?: string
   statuses: Record<string, AgentStatus>
   transcript: TranscriptEntry[]
-  /** Link ids currently carrying a message, for the flight animation. */
-  transit: string[]
+  /** Messages in flight, with their direction along the link. */
+  transit: TransitPacket[]
   selectedId?: string
   /** Extra agents ticked in the roster. Edits then apply to all of them at once. */
   multiIds: string[]
@@ -112,11 +113,19 @@ interface State {
   setDiscoveredModels: (provider: ProviderId, models: string[]) => void
   toggleTheme: () => void
   start: () => void
+  pause: () => void
+  resume: () => void
+  /** Hand a message to one agent, mid-run or while paused. Delivered with the next round. */
+  inject: (agentId: string, text: string) => void
+  /** Pick a finished run back up, from one agent, with every agent's memory intact. */
+  continueFrom: (agentId: string, text: string) => void
   stop: () => void
   reset: () => void
 }
 
 let controller: AbortController | null = null
+/** Survives across runs so a finished run can be continued with its memory. */
+let session: RunSession | null = null
 /**
  * Run generation. Stop-then-start twice in a second and the first runner's last callbacks land
  * after the second one has started: it wrote "stopped" over a run that was already running. Every
@@ -147,6 +156,104 @@ export const useStore = create<State>((set, get) => {
 
   const initialSpec = load<SwarmSpec>(SPEC_KEY, DEFAULT_SPEC)
 
+  const nameOf = (spec: SwarmSpec, id: string) => spec.agents.find((a) => a.id === id)?.name ?? id
+
+  /**
+   * Ends the current run for good.
+   *
+   * Bumping the generation matters as much as the abort: a runner that is mid-stream will still
+   * deliver a few callbacks, and without the bump they land in whatever swarm replaced it —
+   * a probe caught exactly that, loading a preset mid-run left messages signed by agents that no
+   * longer existed.
+   */
+  const haltRun = () => {
+    runSeq++
+    session?.resume()
+    session = null
+    controller?.abort()
+    controller = null
+  }
+
+  /**
+   * Starts a loop over the swarm. `start` throws away the previous session; `continueFrom` keeps it,
+   * which is what lets a finished run pick up with every agent's memory intact.
+   */
+  const launch = (
+    state: State,
+    options: { startFrom?: string[]; keepTranscript?: boolean },
+  ) => {
+    const { spec, keys, endpoints } = state
+    controller?.abort()
+    controller = new AbortController()
+    if (!options.keepTranscript || !session) session = createRunSession()
+
+    set({
+      ...(options.keepTranscript ? {} : { transcript: [], statuses: {} }),
+      round: 0,
+      error: undefined,
+      notice: undefined,
+      transit: [],
+      phase: 'running',
+    })
+
+    // Everything below belongs to THIS generation. A callback from an older runner is dropped.
+    const mine = ++runSeq
+    const fresh = () => mine === runSeq
+    let transitTimer: ReturnType<typeof setTimeout> | undefined
+    let injected = 0
+
+    void runSwarm(
+      spec,
+      keys,
+      {
+        onPhase: (phase, detail) => fresh() && set({ phase, error: detail }),
+        onRound: (round) => fresh() && set({ round }),
+        onAgentStatus: (agentId, status) =>
+          fresh() && set((s) => ({ statuses: { ...s.statuses, [agentId]: status } })),
+        onMessageStart: (entry) => fresh() && set((s) => ({ transcript: [...s.transcript, entry] })),
+        onMessageDelta: (entryId, delta) =>
+          fresh() &&
+          set((s) => ({
+            transcript: s.transcript.map((e) => (e.id === entryId ? { ...e, text: e.text + delta } : e)),
+          })),
+        onMessageEnd: (entryId, patch) =>
+          fresh() &&
+          set((s) => ({ transcript: s.transcript.map((e) => (e.id === entryId ? { ...e, ...patch } : e)) })),
+        onNotice: (notice) => fresh() && set({ notice }),
+        // A human message takes its place in the transcript, so the order of the conversation is
+        // the real one and not "everything the agents said, plus something I typed somewhere".
+        onInjection: (injection) =>
+          fresh() &&
+          set((s) => ({
+            transcript: [
+              ...s.transcript,
+              {
+                id: `h${mine}-${++injected}`,
+                round: injection.round,
+                agentId: injection.agentId,
+                kind: 'human' as const,
+                to: [injection.agentId],
+                text: injection.text,
+                status: 'complete' as const,
+                tokensIn: 0,
+                tokensOut: 0,
+                startedAt: Date.now(),
+                endedAt: Date.now(),
+              },
+            ],
+          })),
+        onTransit: (packets) => {
+          if (!fresh()) return
+          set({ transit: packets })
+          clearTimeout(transitTimer)
+          transitTimer = setTimeout(() => fresh() && set({ transit: [] }), 900)
+        },
+      },
+      controller.signal,
+      { endpoints, session, startFrom: options.startFrom },
+    )
+  }
+
   return {
     spec: initialSpec,
     // An agent is selected from the first frame on purpose: with nothing selected, the panel shows
@@ -169,6 +276,7 @@ export const useStore = create<State>((set, get) => {
     setSpec: (patch) => mutate((spec) => ({ ...spec, ...patch }), { history: false }),
 
     loadPreset: (preset) => {
+      haltRun()
       const spec = structuredClone(preset)
       persistSpec(spec)
       set({
@@ -352,61 +460,42 @@ export const useStore = create<State>((set, get) => {
       set({ themeMode })
     },
 
-    reset: () => set({ transcript: [], statuses: {}, round: 0, phase: 'idle', error: undefined, transit: [] }),
+    reset: () => {
+      haltRun()
+      set({ transcript: [], statuses: {}, round: 0, phase: 'idle', error: undefined, transit: [] })
+    },
 
     stop: () => {
+      // Resume first: a paused runner is parked on the gate, and aborting alone would leave it there.
+      session?.resume()
       controller?.abort()
       controller = null
     },
 
-    start: () => {
-      const { spec, keys, endpoints } = get()
-      controller?.abort()
-      controller = new AbortController()
-      set({
-        transcript: [],
-        statuses: {},
-        round: 0,
-        error: undefined,
-        notice: undefined,
-        transit: [],
-        phase: 'running',
-      })
+    pause: () => session?.pause(),
 
-      // Everything below belongs to THIS generation. A callback from an older runner is dropped.
-      const mine = ++runSeq
-      const fresh = () => mine === runSeq
-      let transitTimer: ReturnType<typeof setTimeout> | undefined
-
-      void runSwarm(
-        spec,
-        keys,
-        {
-          onPhase: (phase, detail) => fresh() && set({ phase, error: detail }),
-          onRound: (round) => fresh() && set({ round }),
-          onAgentStatus: (agentId, status) =>
-            fresh() && set((s) => ({ statuses: { ...s.statuses, [agentId]: status } })),
-          onMessageStart: (entry) => fresh() && set((s) => ({ transcript: [...s.transcript, entry] })),
-          onMessageDelta: (entryId, delta) =>
-            fresh() &&
-            set((s) => ({
-              transcript: s.transcript.map((e) => (e.id === entryId ? { ...e, text: e.text + delta } : e)),
-            })),
-          onMessageEnd: (entryId, patch) =>
-            fresh() &&
-            set((s) => ({ transcript: s.transcript.map((e) => (e.id === entryId ? { ...e, ...patch } : e)) })),
-          onNotice: (notice) => fresh() && set({ notice }),
-          onTransit: (linkIds) => {
-            if (!fresh()) return
-            set({ transit: linkIds })
-            clearTimeout(transitTimer)
-            transitTimer = setTimeout(() => fresh() && set({ transit: [] }), 900)
-          },
-        },
-        controller.signal,
-        endpoints,
-      )
+    resume: () => {
+      session?.resume()
+      if (get().phase === 'paused') set({ phase: 'running' })
     },
+
+    inject: (agentId, text) => {
+      const trimmed = text.trim()
+      if (trimmed === '' || !session) return
+      session.inject(agentId, trimmed)
+      set({ notice: `Message queued for ${nameOf(get().spec, agentId)} — delivered next round.` })
+    },
+
+    continueFrom: (agentId, text) => {
+      // A finished run keeps its session, so continuing is a fresh loop over the SAME memory.
+      const trimmed = text.trim()
+      if (!session) return get().start()
+      session.resume()
+      if (trimmed !== '') session.inject(agentId, trimmed)
+      launch(get(), { startFrom: [agentId], keepTranscript: true })
+    },
+
+    start: () => launch(get(), {}),
   }
 })
 
