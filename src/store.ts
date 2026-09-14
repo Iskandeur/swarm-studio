@@ -224,6 +224,11 @@ export const useStore = create<State>((set, get) => {
         onMessageEnd: (entryId, patch) =>
           fresh() &&
           set((s) => ({ transcript: s.transcript.map((e) => (e.id === entryId ? { ...e, ...patch } : e)) })),
+        onMessageReset: (entryId) =>
+          fresh() &&
+          set((st) => ({
+            transcript: st.transcript.map((e) => (e.id === entryId ? { ...e, text: '' } : e)),
+          })),
         onNotice: (notice) => fresh() && set({ notice }),
         // A human message takes its place in the transcript, so the order of the conversation is
         // the real one and not "everything the agents said, plus something I typed somewhere".

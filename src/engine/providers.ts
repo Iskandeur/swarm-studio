@@ -17,6 +17,8 @@ export interface ChatRequest {
   system: string
   messages: ChatMessage[]
   temperature: number
+  /** Hard ceiling on the answer. Prose asking for brevity is a suggestion; this is not. */
+  maxTokens: number
   apiKey: string
   /** Full chat endpoint URL. Defaults per provider; required for `custom`. */
   endpoint: string
@@ -25,6 +27,8 @@ export interface ChatRequest {
   onDelta: (text: string) => void
   /** Something the user should know that is not a failure (e.g. a parameter the model refused). */
   onNotice?: (message: string) => void
+  /** Throw away what has already been streamed: the answer is being fetched again. */
+  onDiscard?: () => void
 }
 
 export interface ChatResult {
@@ -245,6 +249,25 @@ export function isTemperatureRefusal(message: string): boolean {
   )
 }
 
+/**
+ * Is this streamed text an error report rather than an answer?
+ *
+ * Stricter than `isTemperatureRefusal` on purpose. That one reads an HTTP error body, where anything
+ * goes; this one reads what a model *said*, and a model is allowed to write the words "temperature"
+ * and "not supported" in a sentence. Tested against exactly that: *"The temperature outside is not
+ * supported by the cat…"* must be delivered as the answer it is, not silently re-fetched. So the text
+ * has to both mention the refusal AND wear the clothes of an error: an error-ish opening, or a
+ * machine-readable error type.
+ */
+export function looksLikeStreamedParameterError(text: string): boolean {
+  const trimmed = text.trim()
+  if (trimmed.length > 400 || !isTemperatureRefusal(trimmed)) return false
+  return (
+    /^(\{|unsupported parameter|unknown parameter|unrecognized|invalid|error)/i.test(trimmed) ||
+    /invalid_request_error|"?param(eter)?"?\s*[:=]/i.test(trimmed)
+  )
+}
+
 /** OpenAI-compatible /chat/completions streaming: OpenAI, OpenRouter and any custom gateway. */
 async function chatCompletions(
   req: ChatRequest,
@@ -266,6 +289,10 @@ async function chatCompletions(
     body: JSON.stringify({
       model: req.model,
       ...(sendTemperature ? { temperature: req.temperature } : {}),
+      // Both spellings: the newer OpenAI-compatible gateways rejected max_tokens for the completion
+      // models, the older ones do not know max_completion_tokens. Sending both is accepted by both.
+      max_tokens: req.maxTokens,
+      max_completion_tokens: req.maxTokens,
       stream: true,
       stream_options: { include_usage: true },
       messages: [{ role: 'system', content: req.system }, ...req.messages],
@@ -315,6 +342,22 @@ async function chatCompletions(
   // message let a misconfigured endpoint look like a laconic model.
   if (!sawStream) failureFromBody(res, raw || 'the endpoint answered 200 but sent no stream')
 
+  /**
+   * ⚠️ Some gateways deliver a parameter refusal as **streamed assistant content**, with HTTP 200 and
+   * a well-formed SSE body. Measured on a real one: every agent's answer was the single line
+   * *"Unsupported parameter: 'temperature' is not supported with this model."* and the run reported
+   * `done`. So the retry cannot hang off `res.ok` alone — the refusal has to be recognised in the
+   * TEXT too. Guarded by `sendTemperature` and by the answer being short and nothing else, so a model
+   * legitimately discussing the word "temperature" is never retried behind the user's back.
+   */
+  if (sendTemperature && looksLikeStreamedParameterError(text)) {
+    REJECTS_TEMPERATURE.add(memo)
+    // The refusal was already streamed into the transcript; it must not survive the retry.
+    req.onDiscard?.()
+    req.onNotice?.(`${req.model} does not accept a temperature — retrying without it, and the slider is ignored for this model.`)
+    return chatCompletions(req, extraHeaders, providerId)
+  }
+
   return {
     text,
     tokensIn: tokensIn || estimateTokens(req.system + req.messages.map((m) => m.content).join('')),
@@ -336,7 +379,7 @@ async function anthropic(req: ChatRequest): Promise<ChatResult> {
     },
     body: JSON.stringify({
       model: req.model,
-      max_tokens: 1024,
+      max_tokens: req.maxTokens,
       temperature: req.temperature,
       system: req.system,
       stream: true,

@@ -9,6 +9,10 @@ import {
   Stack,
   ToggleButton,
   ToggleButtonGroup,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
   Tooltip,
   Typography,
 } from '@mui/material'
@@ -16,25 +20,41 @@ import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded'
 import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import CheckRoundedIcon from '@mui/icons-material/CheckRounded'
 import UnfoldMoreRoundedIcon from '@mui/icons-material/UnfoldMoreRounded'
+import IosShareRoundedIcon from '@mui/icons-material/IosShareRounded'
+import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded'
 import { useStore } from '../store'
 import { agentColor, agentGlow } from '../theme'
 import { RichText } from './RichText'
 import { Composer } from './Composer'
+import { exportFilename, toJson, toMarkdown } from '../engine/transcriptExport'
 import type { TranscriptEntry } from '../types'
 
 /** Longer than this and a message is folded: the panel is for reading, not for scrolling past. */
 const FOLD_CHARS = 700
 
+/** Saves a string as a file, without a backend to go through. */
+function download(text: string, filename: string, type: string) {
+  const url = URL.createObjectURL(new Blob([text], { type }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 /** Right panel: what was actually said, in order, colour-matched to the graph. */
 export function TranscriptPanel() {
   const transcript = useStore((s) => s.transcript)
-  const agents = useStore((s) => s.spec.agents)
+  const spec = useStore((s) => s.spec)
+  const agents = spec.agents
+  const round = useStore((s) => s.round)
   const themeMode = useStore((s) => s.themeMode)
   const phase = useStore((s) => s.phase)
   const error = useStore((s) => s.error)
   const select = useStore((s) => s.select)
   const [rendering, setRendering] = useState<'rich' | 'raw'>('rich')
   const [agentFilter, setAgentFilter] = useState<string | null>(null)
+  const [exportMenu, setExportMenu] = useState<HTMLElement | null>(null)
   const bottom = useRef<HTMLDivElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
   /** Only follow the stream while the reader is already at the bottom. */
@@ -53,6 +73,11 @@ export function TranscriptPanel() {
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? id
   const hueOf = (id: string) => agents.find((a) => a.id === id)?.hue ?? 262
   const spoke = [...new Set(transcript.map((e) => e.agentId))]
+
+  /** Built at click time, not on every render: the timestamp has to be the moment you exported. */
+  const runMeta = () => ({ exportedAt: new Date().toISOString(), phase, rounds: round })
+  const markdown = () => toMarkdown(spec, transcript, runMeta())
+  const json = () => toJson(spec, transcript, runMeta())
 
   return (
     <Stack sx={{ height: '100%', overflow: 'hidden' }}>
@@ -73,6 +98,68 @@ export function TranscriptPanel() {
             Raw
           </ToggleButton>
         </ToggleButtonGroup>
+
+        <Tooltip title="Export this run">
+          <span>
+            <IconButton
+              size="small"
+              onClick={(e) => setExportMenu(e.currentTarget)}
+              disabled={transcript.length === 0}
+              aria-label="Export this run"
+            >
+              <IosShareRoundedIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Menu anchorEl={exportMenu} open={Boolean(exportMenu)} onClose={() => setExportMenu(null)}>
+          {/* Markdown first, and it is the one to reach for: it carries the configuration and the
+              prompts alongside the transcript, so it is as readable by a model as by a person. */}
+          <MenuItem
+            onClick={() => {
+              void navigator.clipboard?.writeText(markdown())
+              setExportMenu(null)
+            }}
+          >
+            <ListItemIcon>
+              <ContentCopyRoundedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary="Copy as Markdown" secondary="For a human, or to paste into a chat" />
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              void navigator.clipboard?.writeText(json())
+              setExportMenu(null)
+            }}
+          >
+            <ListItemIcon>
+              <ContentCopyRoundedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary="Copy as JSON" secondary="Same content, machine shape" />
+          </MenuItem>
+          <Divider />
+          <MenuItem
+            onClick={() => {
+              download(markdown(), exportFilename(spec, 'md'), 'text/markdown')
+              setExportMenu(null)
+            }}
+          >
+            <ListItemIcon>
+              <DownloadRoundedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary={`Download ${exportFilename(spec, 'md')}`} />
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              download(json(), exportFilename(spec, 'json'), 'application/json')
+              setExportMenu(null)
+            }}
+          >
+            <ListItemIcon>
+              <DownloadRoundedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary={`Download ${exportFilename(spec, 'json')}`} />
+          </MenuItem>
+        </Menu>
       </Box>
 
       {spoke.length > 1 && (

@@ -12,6 +12,12 @@ import type { Agent, AgentStatus, SwarmSpec, TranscriptEntry } from '../types.ts
 import { callProvider, estimateTokens, resolveEndpoint, type ChatMessage, type Endpoints } from './providers.ts'
 import { createRunSession, type Injection, type RunSession } from './session.ts'
 
+/**
+ * Default ceiling on one agent's answer. A swarm is read as a conversation, so a turn that runs to
+ * 1 500 tokens of bullet lists breaks the form even when the content is fine.
+ */
+export const DEFAULT_MAX_TOKENS = 220
+
 export interface RunnerCallbacks {
   onPhase: (phase: 'running' | 'done' | 'error' | 'stopped' | 'paused', detail?: string) => void
   onRound: (round: number) => void
@@ -19,6 +25,8 @@ export interface RunnerCallbacks {
   onMessageStart: (entry: TranscriptEntry) => void
   onMessageDelta: (entryId: string, delta: string) => void
   onMessageEnd: (entryId: string, patch: Partial<TranscriptEntry>) => void
+  /** Wipe what has been streamed so far: the provider is fetching the answer again. */
+  onMessageReset?: (entryId: string) => void
   /**
    * Messages in flight, for the animation.
    *
@@ -127,7 +135,8 @@ export async function runSwarm(
     for (const injection of session.takeInjections()) {
       if (!byId.has(injection.agentId)) continue
       const queue = inbox.get(injection.agentId) ?? []
-      queue.push({ role: 'user', content: `The human running this swarm says:\n${injection.text}` })
+      // A human injection IS addressed to the agent, so it says so — the only message that is.
+      queue.push({ role: 'user', content: `[the human running this swarm speaks to you] ${injection.text}` })
       inbox.set(injection.agentId, queue)
       if (!active.includes(injection.agentId)) active.push(injection.agentId)
       cb.onInjection?.({ ...injection, round })
@@ -183,7 +192,9 @@ export async function runSwarm(
         for (const link of targets) {
           transiting.push({ id: link.id, reversed: Boolean(link.reversed) })
           const queue = nextInbox.get(link.target) ?? []
-          queue.push({ role: 'user', content: `${agent.name} said:\n${text}` })
+          // Marked as a transcript line, not as someone talking TO the recipient. A chat API has no
+          // third role, so the framing has to do the work the role cannot.
+          queue.push({ role: 'user', content: `[transcript] ${agent.name} said:\n${text}` })
           nextInbox.set(link.target, queue)
         }
       }
@@ -263,10 +274,15 @@ export async function runSwarm(
         system: buildSystem(agent, spec, targetIds.map((id) => byId.get(id)?.name ?? id)),
         messages,
         temperature: agent.temperature,
+        maxTokens: agent.maxTokens ?? DEFAULT_MAX_TOKENS,
         apiKey: keys[agent.provider] ?? '',
         endpoint: resolveEndpoint(agent.provider, endpoints),
         signal: inner.signal,
         onNotice: cb.onNotice,
+        onDiscard: () => {
+          firstDelta = true
+          cb.onMessageReset?.(entryId)
+        },
         onDelta: (delta) => {
           if (firstDelta) {
             firstDelta = false
@@ -309,16 +325,44 @@ export async function runSwarm(
 }
 
 /** The agent's own prompt, plus just enough context to know where its words go. */
+/**
+ * The system prompt. Its ORDER is load-bearing, and getting it wrong wrecked a whole run.
+ *
+ * What happened on 14/09 with "The Cat Council": the persona came first, followed by four lines of
+ * scaffolding ending in "be brief". Every agent ignored its character and answered like a helpful
+ * assistant — The Cat produced *"Decision: Keep the cat inside. Why: 1. Safety & Comfort…"* with
+ * headings and bullet lists, and the two agents after it opened with "That's a solid plan!" and
+ * "I'm glad you liked the suggestions!". Three failures, one cause each:
+ *
+ *  1. **Scaffolding last wins.** A model weights the end of a system prompt more than its start, so
+ *     the housekeeping outranked the role. The role now comes LAST, marked as overriding.
+ *  2. **The previous agent's turn arrives in the `user` role** (there is no other choice in a chat
+ *     API), which is the cue for "someone is asking me for help". Hence the praise and the advice.
+ *     So the prompt says explicitly that these are transcript lines, not requests.
+ *  3. **Brevity asked in prose is a suggestion.** It is now also a `max_tokens` (see `Agent.maxTokens`).
+ */
 function buildSystem(agent: Agent, spec: SwarmSpec, targetNames: string[]): string {
-  const lines = [agent.systemPrompt.trim()]
-  lines.push('')
-  lines.push(`You are "${agent.name}", one agent in a multi-agent swarm working on a shared task.`)
-  lines.push(`Shared task: ${spec.task.trim()}`)
+  const lines: string[] = []
+  lines.push(`You are "${agent.name}", one voice in a multi-agent swarm working on a shared task.`)
+  lines.push(`The shared task is: ${spec.task.trim()}`)
   if (targetNames.length > 0) {
-    lines.push(`Your answer will be sent to: ${targetNames.join(', ')}. Write for them, not for a human reader.`)
+    lines.push(`What you say is passed to: ${targetNames.join(', ')}. Write for them.`)
   } else {
-    lines.push('You are the last agent in the chain: your answer is the swarm output.')
+    lines.push('Nothing is downstream of you: what you say is the swarm output.')
   }
-  lines.push('Be substantive and brief — at most one short paragraph.')
+  lines.push('')
+  lines.push('How this conversation works:')
+  lines.push(
+    '- The messages you receive are OTHER AGENTS\' TURNS, quoted from the transcript. They are not requests addressed to you, and nobody is asking you for help.',
+  )
+  lines.push(
+    '- So never open by evaluating what came before ("that\'s a great point", "solid plan", "I\'m glad you liked"). Never offer advice, tips, lists of suggestions or follow-up questions unless your role is to do exactly that.',
+  )
+  lines.push('- Say your part and stop. One short paragraph. No headings, no bullet lists, no tables.')
+  lines.push('- Stay in character even when it would be more helpful not to. The swarm is the point, not your helpfulness.')
+  lines.push('')
+  // Last, and announced as the winner: this is the line that has to survive the model's habits.
+  lines.push('YOUR ROLE — this overrides everything above:')
+  lines.push(agent.systemPrompt.trim())
   return lines.join('\n')
 }

@@ -27,7 +27,7 @@ import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import StopRoundedIcon from '@mui/icons-material/StopRounded'
 import { useStore } from '../store'
 import { modelForProvider, PROVIDERS, providerInfo, resolveEndpoint } from '../engine/providers'
-import { resolveEntryIds } from '../engine/runner'
+import { DEFAULT_MAX_TOKENS, resolveEntryIds } from '../engine/runner'
 import { agentColor } from '../theme'
 import type { ProviderId } from '../types'
 
@@ -373,6 +373,20 @@ export function Inspector() {
               onChange={(_, value) => updateAgent(agent.id, { temperature: value as number })}
             />
           </Box>
+
+          {/* The real brake on verbosity. Asking for "one short paragraph" in the prompt is a
+              suggestion a model can ignore, and it did: a run produced 1 554 tokens of bullet lists. */}
+          <TextField
+            label="Max tokens"
+            type="number"
+            value={agent.maxTokens ?? DEFAULT_MAX_TOKENS}
+            onChange={(e) =>
+              updateAgent(agent.id, { maxTokens: Math.max(1, Math.floor(Number(e.target.value) || DEFAULT_MAX_TOKENS)) })
+            }
+            inputProps={{ min: 1, step: 20, inputMode: 'numeric' }}
+            helperText="Hard ceiling on this agent's answer"
+            fullWidth
+          />
 
           <Box>
             <Typography variant="caption" sx={{ opacity: 0.7, display: 'block', mb: 0.75 }}>

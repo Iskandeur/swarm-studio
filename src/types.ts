@@ -18,6 +18,14 @@ export interface Agent {
   model: string
   systemPrompt: string
   temperature: number
+  /**
+   * Hard ceiling on this agent's answer.
+   *
+   * "One short paragraph" in the prompt is a suggestion a model can ignore, and it did: a run on
+   * 14/09 produced 457, then 1077, then 1554 output tokens with bullet lists and markdown tables.
+   * Optional so older stored specs keep working; `DEFAULT_MAX_TOKENS` applies when absent.
+   */
+  maxTokens?: number
   /** Hue (0-360) used everywhere this agent shows up: node, edge, transcript. */
   hue: number
   position: { x: number; y: number }
