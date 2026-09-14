@@ -45,11 +45,17 @@ limit.
 ```bash
 npm install
 npm run dev      # http://localhost:5173
-npm test         # engine tests — no key, no network
+npm test         # engine rules + a jsdom mount test — no key, no network
 npm run build
 ```
 
-Node 22+ (the tests run TypeScript directly under `node --experimental-strip-types`).
+Node 22+.
+
+### Publishing
+
+A GitHub Pages workflow ships in `.github/workflows/pages.yml`. Enable it once under
+**Settings → Pages → Source: GitHub Actions**, and every push to `main` publishes the app. Any
+static host works too — the build output is plain files, since there is no server side.
 
 ## How the engine works
 

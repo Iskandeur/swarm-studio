@@ -8,7 +8,6 @@
  * Everything the UI animates comes out of the callbacks below, so the visualisation is
  * never guessing: it draws exactly what the engine did.
  */
-// Explicit .ts extensions in the engine: these modules also run under `node --test`.
 import type { Agent, AgentStatus, SwarmSpec, TranscriptEntry } from '../types.ts'
 import { callProvider, estimateTokens, type ChatMessage } from './providers.ts'
 

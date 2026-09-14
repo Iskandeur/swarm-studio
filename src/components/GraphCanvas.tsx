@@ -10,7 +10,6 @@ import {
   type EdgeChange,
   type NodeChange,
 } from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
 import { Box, useTheme } from '@mui/material'
 import { useStore } from '../store'
 import { resolveEntryIds } from '../engine/runner'

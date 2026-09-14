@@ -1,11 +1,11 @@
 /**
  * Engine tests. Run with: npm test
  *
- * They use the demo provider, so they need no key and no network — the point is to pin the
- * propagation rules, which are the only part of this app that can be wrong silently.
+ * They use the demo provider, so they need no key and no network. The point is the propagation
+ * rules: they are the only part of this app that can be wrong without anything looking broken.
  */
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import { test } from 'vitest'
 import { resolveEntryIds, runSwarm, type RunnerCallbacks } from './runner.ts'
 import type { Agent, SwarmSpec, Topology, TranscriptEntry } from '../types.ts'
 
