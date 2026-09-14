@@ -124,8 +124,11 @@ export function parseModelList(payload: unknown): string[] {
     if (typeof entry === 'string') return ids.add(entry)
     if (entry && typeof entry === 'object') {
       const record = entry as Record<string, unknown>
-      const id = record.id ?? record.name ?? record.model
-      if (typeof id === 'string' && id) ids.add(id)
+      // The first *string* among these, not the first defined one: some gateways number their
+      // models (`id: 169`) and put the callable slug in `name`. With `??` the number wins and
+      // every model silently disappears.
+      const slug = [record.id, record.name, record.model].find((v) => typeof v === 'string' && v !== '')
+      if (typeof slug === 'string') ids.add(slug)
       if (Array.isArray(record.models)) record.models.forEach(take)
     }
   }

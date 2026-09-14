@@ -45,6 +45,20 @@ test('model lists parse from all three gateway shapes', () => {
   )
 })
 
+test('a numeric id does not hide the slug in name', () => {
+  // Seen on a real gateway: `id` is a database key and `name` is what you call. Picking the first
+  // *defined* field instead of the first *string* one dropped all 28 models it served.
+  assert.deepEqual(
+    parseModelList([
+      { host: 'upstream-a', models: [{ id: 169, name: 'large-snc', displayName: 'Large SNC' }] },
+      { host: 'upstream-b', models: [{ id: 170, name: 'small-snc' }] },
+    ]),
+    ['large-snc', 'small-snc'],
+  )
+  // An empty string is not a slug either.
+  assert.deepEqual(parseModelList([{ id: 1, name: '', model: 'fallback' }]), ['fallback'])
+})
+
 test('a model list that is nothing like the expected shape yields nothing, not a crash', () => {
   assert.deepEqual(parseModelList(null), [])
   assert.deepEqual(parseModelList('nope'), [])
