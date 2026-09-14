@@ -1,5 +1,8 @@
 # Swarm Studio
 
+**[Open the live app →](https://iskandeur.github.io/swarm-studio/)** (no key needed: a demo provider
+ships with it)
+
 A browser studio for building, running and **watching** multi-agent swarms.
 
 Draw the agents. Say who is allowed to speak to whom. Pick a model and a system prompt per agent.
@@ -53,9 +56,10 @@ Node 22+.
 
 ### Publishing
 
-A GitHub Pages workflow ships in `.github/workflows/pages.yml`. Enable it once under
-**Settings → Pages → Source: GitHub Actions**, and every push to `main` publishes the app. Any
-static host works too — the build output is plain files, since there is no server side.
+Every push to `main` publishes to [GitHub Pages](https://iskandeur.github.io/swarm-studio/) via
+`.github/workflows/pages.yml` (tests run first; a red suite does not publish). Any static host works
+too — the build output is plain files, since there is no server side. If you fork this, switch
+**Settings → Pages → Source** to *GitHub Actions* once, or the workflow stops at `configure-pages`.
 
 ## How the engine works
 
