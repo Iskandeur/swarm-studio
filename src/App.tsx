@@ -62,10 +62,10 @@ function Shell({ onOpenSettings }: { onOpenSettings: () => void }) {
   )
 }
 
-function Canvas() {
+function Canvas({ onAgentOpen }: { onAgentOpen?: () => void } = {}) {
   return (
     <ReactFlowProvider>
-      <GraphCanvas />
+      <GraphCanvas onAgentOpen={onAgentOpen} />
     </ReactFlowProvider>
   )
 }
@@ -109,7 +109,7 @@ function MobileBody() {
   return (
     <>
       <Box sx={{ flex: 1, minHeight: 0 }}>
-        <Canvas />
+        <Canvas onAgentOpen={() => setSheet('agents')} />
       </Box>
 
       <Paper elevation={0} square sx={{ borderTop: '1px solid', borderColor: 'divider', flexShrink: 0 }}>

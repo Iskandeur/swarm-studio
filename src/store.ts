@@ -68,8 +68,13 @@ export const useStore = create<State>((set, get) => {
     set({ spec })
   }
 
+  const initialSpec = load<SwarmSpec>(SPEC_KEY, DEFAULT_SPEC)
+
   return {
-    spec: load<SwarmSpec>(SPEC_KEY, DEFAULT_SPEC),
+    spec: initialSpec,
+    // An agent is selected from the first frame on purpose: with nothing selected, the panel shows
+    // only a hint, so the model and the prompt — the two things you came for — are invisible.
+    selectedId: initialSpec.agents[0]?.id,
     phase: 'idle',
     round: 0,
     statuses: {},
@@ -85,7 +90,15 @@ export const useStore = create<State>((set, get) => {
     loadPreset: (preset) => {
       const spec = structuredClone(preset)
       persistSpec(spec)
-      set({ spec, transcript: [], statuses: {}, round: 0, phase: 'idle', error: undefined, selectedId: undefined })
+      set({
+        spec,
+        transcript: [],
+        statuses: {},
+        round: 0,
+        phase: 'idle',
+        error: undefined,
+        selectedId: spec.agents[0]?.id,
+      })
     },
 
     addAgent: () => {

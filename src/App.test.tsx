@@ -11,12 +11,18 @@ import { test, afterEach, beforeEach } from 'vitest'
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import App from './App'
 import { useStore } from './store'
+import { PRESETS } from './presets'
 import { setViewport } from './test-setup'
 
-beforeEach(() => setViewport(1280))
+beforeEach(() => {
+  setViewport(1280)
+  // The store is a module singleton, so tests would otherwise inherit each other's selection and
+  // spec. Reloading the preset gives every test the same starting swarm and the same selected agent.
+  useStore.getState().loadPreset(PRESETS[0])
+})
 afterEach(() => {
-  // The store is a module singleton: a run left in flight by one test would still be streaming
-  // into the next one, and the Run button would read "Stop".
+  // A run left in flight by one test would still be streaming into the next one, and the Run button
+  // would read "Stop".
   useStore.getState().stop()
   useStore.getState().reset()
   cleanup()
@@ -48,6 +54,76 @@ test('running the demo swarm streams a message into the transcript', async () =>
   fireEvent.click(screen.getByRole('button', { name: /run swarm/i }))
   await waitFor(() => assert.ok(screen.getByText(/round 1/i)), { timeout: 6000 })
   await waitFor(() => assert.ok(screen.getByRole('button', { name: /stop/i })))
+})
+
+/**
+ * The four things Iskandeur could not do or find on 14/09. Each one is a missing affordance, so
+ * each gets a test that fails if the affordance disappears again.
+ */
+test('the model field is reachable without hunting: an agent is already selected', async () => {
+  render(<App />)
+
+  const model = screen.getByLabelText(/^model$/i)
+  assert.equal((model as HTMLInputElement).value, 'demo-fast')
+  // …and the roster shows each agent's model, so it is readable without selecting anything.
+  assert.ok(screen.getAllByText('demo-terse').length > 0)
+})
+
+test('a link can be cut from the panel, in both directions', async () => {
+  // ⚠️ The ✕ drawn ON the curve cannot be asserted here: React Flow only renders edges once it has
+  // measured the nodes, and jsdom has no layout engine to measure. This test covers the other
+  // affordance, which is the one that works without hover — and is the one a phone needs.
+  render(<App />)
+
+  // The default preset is a ring of three: Proposer → Skeptic → Synthesist → Proposer. With Proposer
+  // selected, both its outgoing (Skeptic) and incoming (Synthesist) link are listed.
+  assert.ok(screen.getByRole('button', { name: /cut link to synthesist/i }))
+  fireEvent.click(screen.getByRole('button', { name: /cut link to skeptic/i }))
+
+  await waitFor(() => assert.equal(useStore.getState().spec.links.length, 2))
+  assert.equal(
+    useStore.getState().spec.links.some((l) => l.source === 'a1' && l.target === 'a2'),
+    false,
+  )
+  assert.equal(screen.queryByRole('button', { name: /cut link to skeptic/i }), null)
+})
+
+test('the topologies explain themselves in a popover', async () => {
+  render(<App />)
+
+  fireEvent.click(screen.getByRole('button', { name: /explain the topologies/i }))
+  await waitFor(() => assert.ok(screen.getByText(/how a turn is handed on/i)))
+  // All three are described, not just the current one.
+  assert.ok(screen.getByText(/widens/i))
+  assert.ok(screen.getByText(/in rotation/i))
+  assert.ok(screen.getByText(/replies upward/i))
+})
+
+test('transcript output is formatted, not dumped as one blob', async () => {
+  render(<App />)
+  useStore.setState({
+    transcript: [
+      {
+        id: 'm1',
+        round: 1,
+        agentId: 'a1',
+        to: ['a2'],
+        text: 'Findings:\n- first point\n- second point\n\n```js\nconst x = 1\n```',
+        status: 'complete',
+        tokensIn: 10,
+        tokensOut: 20,
+        startedAt: 0,
+        endedAt: 1200,
+      },
+    ],
+  })
+
+  await waitFor(() => assert.equal(screen.getAllByRole('listitem').length, 2))
+  assert.ok(screen.getByText('const x = 1'))
+  assert.ok(screen.getByRole('button', { name: /copy this message/i }))
+  // Raw mode is one click away for anyone who wants the untouched text.
+  fireEvent.click(screen.getByRole('button', { name: /^raw$/i }))
+  await waitFor(() => assert.equal(screen.queryAllByRole('listitem').length, 0))
 })
 
 test('at phone width the panels become sheets and Run is one tap away', async () => {

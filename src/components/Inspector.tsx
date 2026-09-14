@@ -16,6 +16,9 @@ import {
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
+import LinkOffRoundedIcon from '@mui/icons-material/LinkOffRounded'
+import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded'
+import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
 import { useStore } from '../store'
 import { PROVIDERS, providerInfo, resolveEndpoint } from '../engine/providers'
 import { resolveEntryIds } from '../engine/runner'
@@ -30,6 +33,7 @@ export function Inspector() {
   const addAgent = useStore((s) => s.addAgent)
   const updateAgent = useStore((s) => s.updateAgent)
   const removeAgent = useStore((s) => s.removeAgent)
+  const removeLink = useStore((s) => s.removeLink)
   const toggleEntry = useStore((s) => s.toggleEntry)
   const keys = useStore((s) => s.keys)
   const endpoints = useStore((s) => s.endpoints)
@@ -41,6 +45,17 @@ export function Inspector() {
   const info = agent ? providerInfo(agent.provider) : undefined
   const missingKey = agent && agent.provider !== 'mock' && !keys[agent.provider]
   const missingEndpoint = agent ? !resolveEndpoint(agent.provider, endpoints) && agent.provider !== 'mock' : false
+  const nameOf = (id: string) => spec.agents.find((a) => a.id === id)?.name ?? id
+  /** Both directions, because "who can speak to me" is half of what a topology means. */
+  const links = agent
+    ? spec.links
+        .filter((l) => l.source === agent.id || l.target === agent.id)
+        .map((link) => ({
+          link,
+          outgoing: link.source === agent.id,
+          other: nameOf(link.source === agent.id ? link.target : link.source),
+        }))
+    : []
   // Models the endpoint actually reported win over the hardcoded suggestions.
   const modelOptions = agent ? discoveredModels[agent.provider] ?? info?.models ?? [] : []
 
@@ -75,9 +90,20 @@ export function Inspector() {
             }}
           >
             <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: agentColor(a.hue, themeMode) }} />
-            <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap>
-              {a.name}
-            </Typography>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="body2" noWrap>
+                {a.name}
+              </Typography>
+              {/* The model is shown here too: it is the first thing you look for, and reading it
+                  should not require selecting the agent first. */}
+              <Typography
+                variant="caption"
+                noWrap
+                sx={{ display: 'block', opacity: 0.55, fontFamily: '"Roboto Mono", monospace', fontSize: 10.5 }}
+              >
+                {a.model || 'no model set'}
+              </Typography>
+            </Box>
             {entryIds.includes(a.id) && <BoltRoundedIcon sx={{ fontSize: 15, opacity: 0.6 }} />}
           </Paper>
         ))}
@@ -88,8 +114,11 @@ export function Inspector() {
       {!agent && (
         <Box sx={{ p: 3, opacity: 0.6 }}>
           <Typography variant="body2">
-            Select an agent to edit it. Drag from a node's right dot to another node's left dot to say
-            who may speak to whom.
+            Pick an agent above to set its <b>model</b>, provider and system prompt.
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 1.5 }}>
+            To link agents, drag from a node's right dot onto another node's left dot. To cut a link,
+            click it and press the ✕ that appears on the curve.
           </Typography>
         </Box>
       )}
@@ -198,6 +227,36 @@ export function Inspector() {
                 />
               ))}
             </Box>
+          </Box>
+
+          <Box>
+            <Typography variant="caption" sx={{ opacity: 0.7, display: 'block', mb: 0.75 }}>
+              Links · {links.length}
+            </Typography>
+            {links.length === 0 && (
+              <Typography variant="caption" sx={{ opacity: 0.55 }}>
+                None yet. Drag from this node's right dot onto another node.
+              </Typography>
+            )}
+            <Stack spacing={0.5}>
+              {links.map(({ link, other, outgoing }) => (
+                <Box key={link.id} sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                  {outgoing ? (
+                    <ArrowForwardRoundedIcon sx={{ fontSize: 15, opacity: 0.6 }} />
+                  ) : (
+                    <ArrowBackRoundedIcon sx={{ fontSize: 15, opacity: 0.6 }} />
+                  )}
+                  <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap>
+                    {other}
+                  </Typography>
+                  <Tooltip title="Cut this link">
+                    <IconButton size="small" aria-label={`Cut link to ${other}`} onClick={() => removeLink(link.id)}>
+                      <LinkOffRoundedIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              ))}
+            </Stack>
           </Box>
 
           <Box>

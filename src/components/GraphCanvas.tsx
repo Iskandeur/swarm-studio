@@ -20,9 +20,13 @@ import { agentColor } from '../theme'
 const nodeTypes = { agent: AgentNode }
 const edgeTypes = { message: MessageEdge }
 
-export function GraphCanvas() {
+export function GraphCanvas({ onAgentOpen }: { onAgentOpen?: () => void } = {}) {
   const theme = useTheme()
   const mode = theme.palette.mode as 'light' | 'dark'
+  /** Kept locally: edges are rebuilt from the store each render, so their selection would be lost.
+   *  It matters because on a touch screen there is no hover — selecting is the only way to reveal
+   *  the cut button. */
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const spec = useStore((s) => s.spec)
   const statuses = useStore((s) => s.statuses)
   const transcript = useStore((s) => s.transcript)
@@ -76,14 +80,17 @@ export function GraphCanvas() {
   const edges: MessageFlowEdge[] = useMemo(
     () =>
       spec.links.map((link) => {
-        const hue = spec.agents.find((a) => a.id === link.source)?.hue ?? 262
+        const from = spec.agents.find((a) => a.id === link.source)
+        const to = spec.agents.find((a) => a.id === link.target)
+        const hue = from?.hue ?? 262
         const active = transit.includes(link.id)
         return {
           id: link.id,
           source: link.source,
           target: link.target,
           type: 'message' as const,
-          data: { hue, active },
+          selected: link.id === selectedEdgeId,
+          data: { hue, active, label: `${from?.name ?? link.source} → ${to?.name ?? link.target}` },
           markerEnd: {
             type: MarkerType.ArrowClosed,
             width: 16,
@@ -92,7 +99,7 @@ export function GraphCanvas() {
           },
         }
       }),
-    [spec.links, spec.agents, transit, mode, theme.palette.divider],
+    [spec.links, spec.agents, transit, mode, theme.palette.divider, selectedEdgeId],
   )
 
   const onNodesChange = useCallback(
@@ -107,7 +114,12 @@ export function GraphCanvas() {
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange<MessageFlowEdge>[]) => {
-      for (const change of changes) if (change.type === 'remove') removeLink(change.id)
+      for (const change of changes) {
+        if (change.type === 'remove') {
+          removeLink(change.id)
+          setSelectedEdgeId((current) => (current === change.id ? null : current))
+        }
+      }
     },
     [removeLink],
   )
@@ -143,7 +155,18 @@ export function GraphCanvas() {
         onNodeDragStop={(_, node) => moveAgent(node.id, node.position)}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onPaneClick={() => select(undefined)}
+        onEdgeClick={(_, edge) => setSelectedEdgeId(edge.id)}
+        // Tapping a node is how you reach its model and prompt. On a phone the panel is a sheet,
+        // so the tap has to open it — otherwise the settings stay invisible behind a second gesture.
+        onNodeClick={(_, node) => {
+          select(node.id)
+          setSelectedEdgeId(null)
+          onAgentOpen?.()
+        }}
+        onPaneClick={() => {
+          select(undefined)
+          setSelectedEdgeId(null)
+        }}
         colorMode={mode}
         fitView
         fitViewOptions={{ padding: 0.3 }}
