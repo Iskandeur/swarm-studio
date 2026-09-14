@@ -1,10 +1,12 @@
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
-import { Box, Chip, Paper, Typography, useMediaQuery, useTheme } from '@mui/material'
+import { Box, Chip, IconButton, Paper, Tooltip, Typography, useMediaQuery, useTheme } from '@mui/material'
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
+import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded'
 import CheckRoundedIcon from '@mui/icons-material/CheckRounded'
 import type { AgentStatus } from '../types'
 import { agentColor, agentGlow } from '../theme'
+import { useStore } from '../store'
 
 export type AgentNodeData = {
   name: string
@@ -29,7 +31,8 @@ const STATUS_LABEL: Record<AgentStatus, string> = {
   error: 'error',
 }
 
-export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
+export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
+  const removeAgent = useStore((s) => s.removeAgent)
   const theme = useTheme()
   const mode = theme.palette.mode as 'light' | 'dark'
   const color = agentColor(data.hue, mode)
@@ -85,7 +88,32 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         />
       )}
 
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75 }}>
+      <Tooltip title={`Delete ${data.name}`}>
+        <IconButton
+          size="small"
+          aria-label={`Delete node ${data.name}`}
+          className="swarm-node-delete"
+          onClick={(event) => {
+            event.stopPropagation()
+            removeAgent(id)
+          }}
+          sx={{
+            position: 'absolute',
+            top: 4,
+            right: 4,
+            width: 20,
+            height: 20,
+            opacity: touch || selected ? 0.55 : 0,
+            transition: 'opacity .18s ease',
+            '&:hover': { opacity: 1, color: 'error.main' },
+            '.react-flow__node:hover &': { opacity: 0.55 },
+          }}
+        >
+          <CloseRoundedIcon sx={{ fontSize: 14 }} />
+        </IconButton>
+      </Tooltip>
+
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75, pr: 2.5 }}>
         <Box
           sx={{
             width: 10,

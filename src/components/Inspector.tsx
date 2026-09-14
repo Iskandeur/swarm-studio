@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import {
   Autocomplete,
   Box,
   Button,
+  Checkbox,
   Chip,
   Divider,
   IconButton,
@@ -33,8 +35,14 @@ export function Inspector() {
   const addAgent = useStore((s) => s.addAgent)
   const updateAgent = useStore((s) => s.updateAgent)
   const removeAgent = useStore((s) => s.removeAgent)
+  const removeAgents = useStore((s) => s.removeAgents)
   const removeLink = useStore((s) => s.removeLink)
   const toggleEntry = useStore((s) => s.toggleEntry)
+  const multiIds = useStore((s) => s.multiIds)
+  const toggleMulti = useStore((s) => s.toggleMulti)
+  const setMulti = useStore((s) => s.setMulti)
+  const applyToAgents = useStore((s) => s.applyToAgents)
+  const [bulkModel, setBulkModel] = useState('')
   const keys = useStore((s) => s.keys)
   const endpoints = useStore((s) => s.endpoints)
   const discoveredModels = useStore((s) => s.discoveredModels)
@@ -58,6 +66,14 @@ export function Inspector() {
     : []
   // Models the endpoint actually reported win over the hardcoded suggestions.
   const modelOptions = agent ? discoveredModels[agent.provider] ?? info?.models ?? [] : []
+  /** For the bulk field: every model known across the providers the ticked agents actually use. */
+  const bulkModelOptions = [
+    ...new Set(
+      spec.agents
+        .filter((a) => multiIds.includes(a.id))
+        .flatMap((a) => discoveredModels[a.provider] ?? providerInfo(a.provider).models),
+    ),
+  ].sort()
 
   return (
     <Stack sx={{ height: '100%', overflow: 'hidden' }}>
@@ -78,10 +94,10 @@ export function Inspector() {
             onClick={() => select(a.id)}
             sx={{
               px: 1.25,
-              py: 0.85,
+              py: 0.5,
               display: 'flex',
               alignItems: 'center',
-              gap: 1,
+              gap: 0.5,
               cursor: 'pointer',
               border: '1px solid',
               borderColor: a.id === selectedId ? agentColor(a.hue, themeMode) : 'transparent',
@@ -89,6 +105,14 @@ export function Inspector() {
               '&:hover': { bgcolor: 'action.hover' },
             }}
           >
+            <Checkbox
+              size="small"
+              checked={multiIds.includes(a.id)}
+              onClick={(event) => event.stopPropagation()}
+              onChange={() => toggleMulti(a.id)}
+              inputProps={{ 'aria-label': `Select ${a.name} for bulk editing` }}
+              sx={{ p: 0.5 }}
+            />
             <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: agentColor(a.hue, themeMode) }} />
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="body2" noWrap>
@@ -105,9 +129,92 @@ export function Inspector() {
               </Typography>
             </Box>
             {entryIds.includes(a.id) && <BoltRoundedIcon sx={{ fontSize: 15, opacity: 0.6 }} />}
+            <Tooltip title={`Delete ${a.name}`}>
+              <IconButton
+                size="small"
+                aria-label={`Delete agent ${a.name}`}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  removeAgent(a.id)
+                }}
+                sx={{ p: 0.4, opacity: 0.45, '&:hover': { opacity: 1, color: 'error.main' } }}
+              >
+                <DeleteOutlineRoundedIcon sx={{ fontSize: 16 }} />
+              </IconButton>
+            </Tooltip>
           </Paper>
         ))}
       </Stack>
+
+      {/* Bulk edit. Without it, giving eight agents the same model means eight identical trips
+          through the same three fields. */}
+      {multiIds.length > 0 && (
+        <Box sx={{ px: 2, pb: 2 }}>
+          <Paper
+            elevation={0}
+            sx={{ p: 1.5, border: '1px solid', borderColor: 'primary.main', bgcolor: 'action.hover' }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.25 }}>
+              <Typography variant="subtitle2" sx={{ flex: 1 }}>
+                {multiIds.length} selected
+              </Typography>
+              <Button size="small" onClick={() => setMulti(spec.agents.map((a) => a.id))}>
+                All
+              </Button>
+              <Button size="small" color="inherit" onClick={() => setMulti([])}>
+                Clear
+              </Button>
+            </Box>
+
+            <Stack spacing={1.5}>
+              <TextField
+                select
+                label="Provider for all selected"
+                value=""
+                onChange={(e) => {
+                  const provider = e.target.value as ProviderId
+                  const suggested = providerInfo(provider).models[0]
+                  applyToAgents(multiIds, { provider, ...(suggested ? { model: suggested } : {}) })
+                }}
+                fullWidth
+              >
+                {PROVIDERS.map((p) => (
+                  <MenuItem key={p.id} value={p.id}>
+                    {p.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+
+              <Autocomplete
+                freeSolo
+                size="small"
+                options={bulkModelOptions}
+                value={bulkModel}
+                onChange={(_, value) => setBulkModel(value ?? '')}
+                onInputChange={(_, value) => setBulkModel(value)}
+                renderInput={(params) => <TextField {...params} label="Model for all selected" />}
+              />
+              <Button
+                size="small"
+                variant="contained"
+                disabled={bulkModel.trim() === ''}
+                onClick={() => applyToAgents(multiIds, { model: bulkModel.trim() })}
+              >
+                Apply model to {multiIds.length}
+              </Button>
+
+              <Button
+                size="small"
+                color="error"
+                startIcon={<DeleteOutlineRoundedIcon />}
+                onClick={() => removeAgents(multiIds)}
+              >
+                Delete {multiIds.length} agents
+              </Button>
+            </Stack>
+          </Paper>
+        </Box>
+      )}
 
       <Divider />
 

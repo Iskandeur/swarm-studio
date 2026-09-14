@@ -23,17 +23,30 @@ import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded'
 import MoreVertRoundedIcon from '@mui/icons-material/MoreVertRounded'
+import UndoRoundedIcon from '@mui/icons-material/UndoRounded'
+import RedoRoundedIcon from '@mui/icons-material/RedoRounded'
+import KeyboardRoundedIcon from '@mui/icons-material/KeyboardRounded'
 import { useStore } from '../store'
 import { PRESETS } from '../presets'
 import { SwarmSettings } from './SwarmSettings'
 
-export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
+export function TopBar({
+  onOpenSettings,
+  onOpenHelp,
+}: {
+  onOpenSettings: () => void
+  onOpenHelp: () => void
+}) {
   const theme = useTheme()
   const compact = useMediaQuery(theme.breakpoints.down('md'))
   const spec = useStore((s) => s.spec)
   const loadPreset = useStore((s) => s.loadPreset)
   const themeMode = useStore((s) => s.themeMode)
   const toggleTheme = useStore((s) => s.toggleTheme)
+  const undo = useStore((s) => s.undo)
+  const redo = useStore((s) => s.redo)
+  const canUndo = useStore((s) => s.past.length > 0)
+  const canRedo = useStore((s) => s.future.length > 0)
   const [presetMenu, setPresetMenu] = useState<HTMLElement | null>(null)
   const [overflow, setOverflow] = useState<HTMLElement | null>(null)
 
@@ -87,6 +100,23 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
 
         <Box sx={{ flex: 1 }} />
 
+        {/* Undo and redo are visible, not only bound: a graph editor where the only way back is a
+            keystroke you have to guess is a graph editor people are afraid to touch. */}
+        <Tooltip title="Undo (Ctrl/⌘ + Z)">
+          <span>
+            <IconButton onClick={undo} disabled={!canUndo} aria-label="Undo">
+              <UndoRoundedIcon />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title="Redo (Ctrl/⌘ + Shift + Z)">
+          <span>
+            <IconButton onClick={redo} disabled={!canRedo} aria-label="Redo">
+              <RedoRoundedIcon />
+            </IconButton>
+          </span>
+        </Tooltip>
+
         {compact ? (
           <>
             <Tooltip title="Providers and keys">
@@ -120,6 +150,17 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
                 </ListItemIcon>
                 <ListItemText>Export JSON</ListItemText>
               </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  onOpenHelp()
+                  setOverflow(null)
+                }}
+              >
+                <ListItemIcon>
+                  <KeyboardRoundedIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Keyboard shortcuts</ListItemText>
+              </MenuItem>
               <Divider />
               <MenuItem
                 component="a"
@@ -146,6 +187,11 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
             <Tooltip title="Providers and keys">
               <IconButton onClick={onOpenSettings}>
                 <SettingsRoundedIcon />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Keyboard shortcuts (?)">
+              <IconButton onClick={onOpenHelp} aria-label="Keyboard shortcuts">
+                <KeyboardRoundedIcon />
               </IconButton>
             </Tooltip>
             <Tooltip title={themeMode === 'dark' ? 'Light mode' : 'Dark mode'}>

@@ -49,7 +49,8 @@ export interface TranscriptEntry {
   /** Agent ids this message was handed to. Empty for a leaf. */
   to: string[]
   text: string
-  status: 'streaming' | 'complete' | 'error'
+  /** `stopped` keeps whatever had already streamed: a halted answer is not a failed one. */
+  status: 'streaming' | 'complete' | 'error' | 'stopped'
   tokensIn: number
   tokensOut: number
   startedAt: number

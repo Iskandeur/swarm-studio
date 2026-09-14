@@ -179,6 +179,8 @@ function Message({
   const streaming = entry.status === 'streaming'
   const long = entry.text.length > FOLD_CHARS
   const folded = long && !expanded && !streaming
+  // A stopped answer keeps its partial text, so it renders like a normal one, not like a failure.
+  const stoppedEmpty = entry.status === 'stopped' && entry.text.trim() === ''
   const shown = folded ? entry.text.slice(0, FOLD_CHARS) : entry.text
   const seconds = entry.endedAt ? (entry.endedAt - entry.startedAt) / 1000 : undefined
   const color = agentColor(hue, mode)
@@ -222,6 +224,9 @@ function Message({
         {to.length === 0 && entry.status === 'complete' && (
           <Chip size="small" label="swarm output" sx={{ height: 17, fontSize: 10 }} />
         )}
+        {entry.status === 'stopped' && (
+          <Chip size="small" label="stopped" variant="outlined" sx={{ height: 17, fontSize: 10 }} />
+        )}
         <Box sx={{ flex: 1 }} />
         <Typography variant="caption" sx={{ opacity: 0.4, fontFamily: '"Roboto Mono", monospace', fontSize: 10.5 }}>
           {entry.tokensIn}↓ {entry.tokensOut}↑{seconds !== undefined ? ` · ${seconds.toFixed(1)}s` : ''}
@@ -240,6 +245,10 @@ function Message({
       {entry.status === 'error' ? (
         <Typography variant="body2" color="error" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
           {entry.text}
+        </Typography>
+      ) : stoppedEmpty ? (
+        <Typography variant="body2" sx={{ opacity: 0.55, fontStyle: 'italic' }}>
+          Stopped before this agent answered.
         </Typography>
       ) : rendering === 'raw' ? (
         <Typography

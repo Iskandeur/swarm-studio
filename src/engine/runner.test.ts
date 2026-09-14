@@ -153,6 +153,39 @@ test('an empty swarm reports an error instead of hanging', async () => {
   assert.match(error ?? '', /at least one agent/i)
 })
 
+test('one agent failing stops its siblings instead of letting them stream on', async () => {
+  // Found by an adversarial probe: the run went to "error" while the healthy sibling kept writing
+  // text into the transcript — a failed run that goes on talking.
+  const broken = agent('x', { provider: 'custom', model: 'nowhere' }) // no endpoint => throws at once
+  const healthy = agent('a', { model: 'demo-verbose' }) // slow on purpose
+  const s = spec({ agents: [healthy, broken], links: [], entryIds: ['a', 'x'], maxRounds: 3 })
+
+  const texts = new Map<string, string>()
+  let phase = ''
+  let detail: string | undefined
+  const cb: RunnerCallbacks = {
+    onPhase: (p, d) => {
+      phase = p
+      if (d) detail = d
+    },
+    onRound: () => {},
+    onAgentStatus: () => {},
+    onMessageStart: (entry) => texts.set(entry.id, ''),
+    onMessageDelta: (id, delta) => texts.set(id, (texts.get(id) ?? '') + delta),
+    onMessageEnd: () => {},
+    onTransit: () => {},
+  }
+
+  await runSwarm(s, {}, cb, new AbortController().signal)
+  assert.equal(phase, 'error', 'the phase reports the breakage, not a clean stop')
+  assert.match(detail ?? '', /endpoint/i)
+
+  // The run has returned. Nothing may still be writing.
+  const snapshot = JSON.stringify([...texts.entries()])
+  await new Promise((r) => setTimeout(r, 250))
+  assert.equal(JSON.stringify([...texts.entries()]), snapshot, 'no sibling is still streaming')
+})
+
 test('stopping mid-run leaves the phase stopped', async () => {
   const controller = new AbortController()
   const phases: string[] = []

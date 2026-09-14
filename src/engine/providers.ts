@@ -23,6 +23,8 @@ export interface ChatRequest {
   signal: AbortSignal
   /** Called with each chunk of text as it arrives. */
   onDelta: (text: string) => void
+  /** Something the user should know that is not a failure (e.g. a parameter the model refused). */
+  onNotice?: (message: string) => void
 }
 
 export interface ChatResult {
@@ -185,7 +187,11 @@ async function* sseLines(res: Response): AsyncGenerator<string> {
 }
 
 async function failure(res: Response): Promise<never> {
-  const body = await res.text().catch(() => '')
+  return failureFromBody(res, await res.text().catch(() => ''))
+}
+
+/** Split out because a retry path has already consumed the body — a Response can only be read once. */
+function failureFromBody(res: Response, body: string): never {
   let detail = body.slice(0, 400)
   try {
     const parsed = JSON.parse(body)
@@ -196,9 +202,39 @@ async function failure(res: Response): Promise<never> {
   throw new Error(`HTTP ${res.status} — ${detail || res.statusText}`)
 }
 
+/**
+ * Models that reject `temperature` outright, keyed `provider:model`.
+ *
+ * Reasoning models (the o-series and the GPT-5 family, and whatever a gateway fronts them with)
+ * answer `400 Unsupported parameter: 'temperature'`. There is no way to know from the model id —
+ * gateways rename freely — so the fact is learned from the refusal and remembered for the session
+ * instead of being hardcoded into a list that would rot.
+ */
+const REJECTS_TEMPERATURE = new Set<string>()
+
+/** Does this error body say "I will not accept temperature"? */
+export function isTemperatureRefusal(message: string): boolean {
+  const lower = message.toLowerCase()
+  if (!lower.includes('temperature')) return false
+  return (
+    lower.includes('unsupported') ||
+    lower.includes('not supported') ||
+    lower.includes('does not support') ||
+    lower.includes('unknown parameter') ||
+    lower.includes('unrecognized')
+  )
+}
+
 /** OpenAI-compatible /chat/completions streaming: OpenAI, OpenRouter and any custom gateway. */
-async function chatCompletions(req: ChatRequest, extraHeaders: Record<string, string> = {}): Promise<ChatResult> {
+async function chatCompletions(
+  req: ChatRequest,
+  extraHeaders: Record<string, string> = {},
+  providerId = 'openai',
+): Promise<ChatResult> {
   if (!req.endpoint) throw new Error('no endpoint URL set for this provider — open Settings')
+  const memo = `${providerId}:${req.model}`
+  const sendTemperature = !REJECTS_TEMPERATURE.has(memo)
+
   const res = await fetch(req.endpoint, {
     method: 'POST',
     signal: req.signal,
@@ -209,12 +245,23 @@ async function chatCompletions(req: ChatRequest, extraHeaders: Record<string, st
     },
     body: JSON.stringify({
       model: req.model,
-      temperature: req.temperature,
+      ...(sendTemperature ? { temperature: req.temperature } : {}),
       stream: true,
       stream_options: { include_usage: true },
       messages: [{ role: 'system', content: req.system }, ...req.messages],
     }),
   })
+
+  // Learn the refusal, then retry once without the parameter rather than making the user find out.
+  if (!res.ok && sendTemperature) {
+    const body = await res.text().catch(() => '')
+    if (isTemperatureRefusal(body)) {
+      REJECTS_TEMPERATURE.add(memo)
+      req.onNotice?.(`${req.model} does not accept a temperature — retrying without it, and the slider is ignored for this model.`)
+      return chatCompletions(req, extraHeaders, providerId)
+    }
+    await failureFromBody(res, body)
+  }
   if (!res.ok) await failure(res)
 
   let text = ''
@@ -329,11 +376,12 @@ export function callProvider(provider: ProviderId, req: ChatRequest): Promise<Ch
       return anthropic(req)
     case 'openai':
     case 'custom':
-      return chatCompletions(req)
+      return chatCompletions(req, {}, provider)
     case 'openrouter':
-      return chatCompletions(req, {
-        'HTTP-Referer': window.location.origin,
-        'X-Title': 'Swarm Studio',
-      })
+      return chatCompletions(
+        req,
+        { 'HTTP-Referer': window.location.origin, 'X-Title': 'Swarm Studio' },
+        provider,
+      )
   }
 }

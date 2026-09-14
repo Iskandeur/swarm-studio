@@ -149,10 +149,19 @@ export function SwarmSettings({ direction = 'row' }: { direction?: 'row' | 'colu
         label="Max rounds"
         type="number"
         value={spec.maxRounds}
-        onChange={(e) => setSpec({ maxRounds: Math.max(1, Math.min(24, Number(e.target.value) || 1)) })}
-        sx={{ width: column ? '100%' : 100 }}
-        inputProps={{ min: 1, max: 24, inputMode: 'numeric' }}
-        helperText={column ? 'Hard stop on the number of turns.' : undefined}
+        // No upper bound: it is a budget, not a safety rail, and capping it at 24 silently
+        // rewrote what the user typed. Above ~40 rounds the warning is the honest guard.
+        onChange={(e) => setSpec({ maxRounds: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+        sx={{ width: column ? '100%' : 110 }}
+        inputProps={{ min: 1, step: 1, inputMode: 'numeric' }}
+        error={spec.maxRounds > 40}
+        helperText={
+          spec.maxRounds > 40
+            ? `${spec.maxRounds} rounds will cost real money on a paid provider`
+            : column
+              ? 'Hard stop on the number of turns.'
+              : undefined
+        }
       />
     </Stack>
   )

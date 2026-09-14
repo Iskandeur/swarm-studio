@@ -1,14 +1,23 @@
 import { useMemo, useState } from 'react'
 import {
+  Alert,
   Badge,
   BottomNavigation,
   BottomNavigationAction,
   Box,
+  Button,
   CssBaseline,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Drawer,
   LinearProgress,
   Paper,
+  Snackbar,
+  Stack,
   ThemeProvider,
+  Typography,
   useMediaQuery,
 } from '@mui/material'
 import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
@@ -25,6 +34,7 @@ import { GraphCanvas } from './components/GraphCanvas'
 import { TranscriptPanel } from './components/TranscriptPanel'
 import { RunBar } from './components/RunBar'
 import { SettingsDialog } from './components/SettingsDialog'
+import { SHORTCUTS, useHotkeys } from './components/useHotkeys'
 
 type Sheet = 'agents' | 'setup' | 'log' | null
 
@@ -32,17 +42,76 @@ export default function App() {
   const themeMode = useStore((s) => s.themeMode)
   const theme = useMemo(() => buildTheme(themeMode), [themeMode])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const notice = useStore((s) => s.notice)
+  const dismissNotice = useStore((s) => s.dismissNotice)
+
+  useHotkeys({ onHelp: () => setHelpOpen(true) })
 
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Shell onOpenSettings={() => setSettingsOpen(true)} />
+      <Shell onOpenSettings={() => setSettingsOpen(true)} onOpenHelp={() => setHelpOpen(true)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <ShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      {/* A model refusing a parameter is not a failure, so it must not look like one — but it has
+          to be visible, or the slider silently lies about what was sent. */}
+      <Snackbar
+        open={Boolean(notice)}
+        autoHideDuration={9000}
+        onClose={dismissNotice}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="info" variant="filled" onClose={dismissNotice} sx={{ maxWidth: 520 }}>
+          {notice}
+        </Alert>
+      </Snackbar>
     </ThemeProvider>
   )
 }
 
-function Shell({ onOpenSettings }: { onOpenSettings: () => void }) {
+function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+      <DialogTitle>Keyboard shortcuts</DialogTitle>
+      <DialogContent>
+        <Stack spacing={1}>
+          {SHORTCUTS.map((shortcut) => (
+            <Box key={shortcut.keys} sx={{ display: 'flex', alignItems: 'baseline', gap: 2 }}>
+              <Box
+                component="kbd"
+                sx={{
+                  fontFamily: '"Roboto Mono", monospace',
+                  fontSize: 11.5,
+                  px: 0.75,
+                  py: 0.25,
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  bgcolor: 'action.hover',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {shortcut.keys}
+              </Box>
+              <Typography variant="body2">{shortcut.what}</Typography>
+            </Box>
+          ))}
+        </Stack>
+        <Typography variant="caption" sx={{ display: 'block', mt: 2, opacity: 0.65 }}>
+          Shortcuts are ignored while you are typing in a field.
+        </Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button variant="contained" onClick={onClose}>
+          Done
+        </Button>
+      </DialogActions>
+    </Dialog>
+  )
+}
+
+function Shell({ onOpenSettings, onOpenHelp }: { onOpenSettings: () => void; onOpenHelp: () => void }) {
   // `md` is the switch: below it there is no room for three columns side by side.
   const mobile = useMediaQuery('(max-width:899.95px)')
 
@@ -56,7 +125,7 @@ function Shell({ onOpenSettings }: { onOpenSettings: () => void }) {
         overflow: 'hidden',
       }}
     >
-      <TopBar onOpenSettings={onOpenSettings} />
+      <TopBar onOpenSettings={onOpenSettings} onOpenHelp={onOpenHelp} />
       {mobile ? <MobileBody /> : <DesktopBody />}
     </Box>
   )
