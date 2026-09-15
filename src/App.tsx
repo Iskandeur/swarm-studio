@@ -133,8 +133,12 @@ function Shell({
   return (
     <Box
       sx={{
-        // dvh follows the mobile URL bar; vh is the fallback for older engines.
-        height: ['100vh', '100dvh'],
+        // dvh follows the mobile URL bar; vh is the fallback for older engines. It has to be a real
+        // CSS fallback: an ARRAY here is MUI's breakpoint syntax, so `['100vh', '100dvh']` meant
+        // "100vh below sm, 100dvh above" — every phone got the one unit that ignores the URL bar,
+        // and the bottom navigation sat under it, unreachable, on a page that cannot scroll.
+        height: '100vh',
+        '@supports (height: 100dvh)': { height: '100dvh' },
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -201,7 +205,10 @@ function MobileBody() {
         <BottomNavigation
           showLabels
           value={sheet}
-          sx={{ bgcolor: 'transparent', height: 60, pb: 'env(safe-area-inset-bottom)' }}
+          // The home-indicator inset is padding ON TOP of the bar, not a slice out of it: with a
+          // fixed height and border-box sizing it ate the icons instead, leaving 26px of bar on the
+          // phones that have one.
+          sx={{ bgcolor: 'transparent', height: 'auto', minHeight: 60, pb: 'env(safe-area-inset-bottom)' }}
         >
           <BottomNavigationAction
             label="Agents"

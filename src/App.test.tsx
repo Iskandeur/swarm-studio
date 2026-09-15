@@ -243,3 +243,23 @@ test('at phone width the task sheet carries the topology controls', async () => 
   assert.ok(screen.getByLabelText(/max rounds/i))
   assert.ok(screen.getByLabelText(/task given to the entry agents/i))
 })
+
+test('the shell height follows the visible viewport, and is not gated behind a breakpoint', () => {
+  // The bug this pins: `height: ['100vh', '100dvh']` reads like a CSS fallback and is not one —
+  // an array in `sx` is MUI's breakpoint syntax, so the dvh height only applied from `sm` up and
+  // every phone got 100vh. On a browser with a URL bar that is taller than the visible area, and
+  // the page cannot scroll (body is overflow:hidden), so the bottom navigation was simply gone.
+  setViewport(390)
+  render(<App />)
+
+  const css = Array.from(document.querySelectorAll('style'))
+    .map((tag) => tag.textContent ?? '')
+    .join('\n')
+
+  assert.match(css, /100dvh/, 'the shell asks for the dynamic viewport height')
+  assert.equal(
+    /@media[^{]*min-width[^{]*\{[^}]*100dvh/.test(css),
+    false,
+    'that height must not sit behind a min-width media query — phones are below every breakpoint',
+  )
+})

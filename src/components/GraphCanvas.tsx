@@ -6,6 +6,8 @@ import {
   Controls,
   MarkerType,
   ReactFlow,
+  useNodesInitialized,
+  useReactFlow,
   type Connection,
   type EdgeChange,
   type NodeChange,
@@ -75,6 +77,22 @@ export function GraphCanvas({ onAgentOpen }: { onAgentOpen?: () => void } = {}) 
       })
     })
   }, [spec.agents, statuses, entryIds, live, selectedId])
+
+  /**
+   * `fitView` on the component runs with whatever sizes React Flow has at mount, and on a phone the
+   * nodes are not measured yet — so the graph opened at zoom 1 with half the swarm off the right
+   * edge. Frame it once, the first time the nodes have real dimensions, and never again: a refit
+   * after that would yank the canvas back every time the keyboard opened.
+   */
+  const { fitView } = useReactFlow()
+  const nodesInitialized = useNodesInitialized()
+  const [framed, setFramed] = useState(false)
+
+  useEffect(() => {
+    if (!nodesInitialized || framed) return
+    setFramed(true)
+    void fitView({ padding: 0.3 })
+  }, [nodesInitialized, framed, fitView])
 
   const edges: MessageFlowEdge[] = useMemo(
     () =>
