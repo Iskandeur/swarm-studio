@@ -222,7 +222,8 @@ test('at phone width the panels become sheets and Run is one tap away', async ()
   render(<App />)
 
   // No desktop side panels: the transcript header only exists once a sheet is opened.
-  assert.equal(screen.queryByText(/TRANSCRIPT/i), null)
+  // Counts, not elements: a failing assert holding a jsdom node hangs the worker instead of failing.
+  assert.equal(screen.queryAllByText(/TRANSCRIPT/i).length, 0)
   // The four bottom actions are there, and the graph is not covered by a form.
   for (const label of [/agents/i, /task/i, /log/i, /^run$/i]) {
     assert.ok(screen.getByRole('button', { name: label }), String(label))
@@ -237,7 +238,7 @@ test('at phone width the task sheet carries the topology controls', async () => 
   render(<App />)
 
   // Topology lives in the app bar on desktop; on a phone it moves into the Task sheet.
-  assert.equal(screen.queryByLabelText(/topology/i), null)
+  assert.equal(screen.queryAllByLabelText(/topology/i).length, 0)
   fireEvent.click(screen.getByRole('button', { name: /task/i }))
   await waitFor(() => assert.ok(screen.getByLabelText(/topology/i)))
   assert.ok(screen.getByLabelText(/max rounds/i))

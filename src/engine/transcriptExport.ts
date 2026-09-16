@@ -19,7 +19,12 @@ export interface RunMeta {
   rounds: number
 }
 
-const nameOf = (spec: SwarmSpec, id: string) => spec.agents.find((a) => a.id === id)?.name ?? id
+/** Agents first, then any other node, then what lives inside blocks: a nested entry's id is not the swarm's. */
+const nameOf = (spec: SwarmSpec, id: string) =>
+  spec.agents.find((a) => a.id === id)?.name ??
+  (spec.nodes ?? []).find((n) => n.id === id)?.name ??
+  (spec.blocks ?? []).flatMap((b) => [...b.graph.agents, ...(b.graph.nodes ?? [])]).find((n) => n.id === id)?.name ??
+  id
 
 /** Totals worth stating once at the top rather than making the reader add them up. */
 export function summarise(transcript: TranscriptEntry[]) {
@@ -82,21 +87,27 @@ export function toMarkdown(spec: SwarmSpec, transcript: TranscriptEntry[], meta:
 
   let round = -1
   for (const entry of transcript) {
-    if (entry.round !== round) {
+    // Rounds inside a block restart at 1; only the swarm's own rounds make a heading.
+    if (!entry.path?.length && entry.round !== round) {
       round = entry.round
       out.push(`### Round ${round}`)
       out.push('')
     }
-    const who = entry.kind === 'human' ? 'YOU (human)' : nameOf(spec, entry.agentId)
+    const who = entry.kind === 'human' ? 'YOU (human)' : entry.speaker ?? nameOf(spec, entry.agentId)
+    const where = entry.path?.length ? ` *(inside ${entry.path.map((id) => nameOf(spec, id)).join(' › ')})*` : ''
     const to = entry.to.length > 0 ? ` → ${entry.to.map((id) => nameOf(spec, id)).join(', ')}` : ' → (swarm output)'
     const seconds = entry.endedAt ? ` · ${((entry.endedAt - entry.startedAt) / 1000).toFixed(1)}s` : ''
     const status = entry.status === 'complete' ? '' : ` · ${entry.status}`
-    out.push(`**${who}**${to}  `)
+    out.push(`**${who}**${to}${where}  `)
     out.push(`*${entry.tokensIn} in / ${entry.tokensOut} out${seconds}${status}*`)
     out.push('')
     // Quoted, so a model reading this cannot mistake an agent's words for an instruction to itself.
     for (const line of (entry.text.trim() || '(empty)').split('\n')) out.push(`> ${line}`)
     out.push('')
+    if (entry.actions?.length) {
+      for (const action of entry.actions) out.push(`- *${action.type}:* ${action.text}`)
+      out.push('')
+    }
   }
 
   return out.join('\n')
@@ -125,7 +136,9 @@ export function toJson(spec: SwarmSpec, transcript: TranscriptEntry[], meta: Run
       messages: transcript.map((entry) => ({
         id: entry.id,
         round: entry.round,
-        from: entry.kind === 'human' ? 'human' : nameOf(spec, entry.agentId),
+        from: entry.kind === 'human' ? 'human' : entry.speaker ?? nameOf(spec, entry.agentId),
+        ...(entry.path?.length ? { inside: entry.path.map((id) => nameOf(spec, id)) } : {}),
+        ...(entry.actions?.length ? { actions: entry.actions } : {}),
         fromId: entry.agentId,
         to: entry.to.map((id) => nameOf(spec, id)),
         status: entry.status,

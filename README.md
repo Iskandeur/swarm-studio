@@ -9,6 +9,10 @@ Draw the agents. Say who is allowed to speak to whom. Pick a model and a system 
 Press Run, and watch the conversation travel through the graph as it happens — nodes light up while
 they think, messages slide along the links they are actually sent on, the transcript fills in live.
 
+It is also a graph-engineering workbench: conditional branches, joins, human approval gates, shared
+memory between agents, reusable blocks that can contain themselves, and agents that spawn other
+agents live on the canvas.
+
 No backend, no build step to deploy, no account. A demo provider ships with the app, so the whole
 thing is usable — and demoable — with no API key at all.
 
@@ -25,6 +29,11 @@ order. This app makes the shape the primary object, and the run a thing you can 
 | **Build a topology** | Drag agents around; drag from a node's right dot to another node's left dot to grant "may speak to". Links are directed, so hierarchies, rings and meshes are all expressible. |
 | **Configure each agent** | Provider, model (free text — a new model release needs no code change), system prompt, temperature, colour. |
 | **Choose a propagation rule** | `Broadcast` — every outgoing link carries the message. `Round-robin` — one link per turn, rotating. `Manager` — the entry agent delegates, workers report back, the manager speaks again with every reply in hand. |
+| **Branch on conditions** | A link can carry a condition (message contains, matches a pattern, a JSON field compares, a shared-memory key has a value, this link has fired fewer than N times). Zero-token **Condition** nodes send to their `true` or `false` side, a **Join** waits for every branch, an **Output** marks the result. An agent set to *choose* names its branch itself with `<route to="…"/>`. Conditions are data, never code: a pasted swarm cannot run anything. |
+| **Put a human in the loop** | A **Human gate** stops the flow and asks you. Approve, reject, or edit the text before it goes on. |
+| **Share knowledge between agents** | A **Memory** node is a blackboard (shared keys), a log, or a co-written document. Draw agent → memory to let it write (`<write memory="…">`), memory → agent to let it read. A reader sees the memory in its prompt within a character budget, ranked by relevance when it does not fit; seed it with reference text and it is a knowledge base. Turn on *wake readers* and it becomes a publish-subscribe bus. |
+| **Reuse and recurse** | Save any selection as a **Block**, drop it anywhere as one node, double-click to edit its inside (every instance follows). A block may contain itself: nested runs share the swarm's round budget and stop at the depth limit. Four built-ins: Critic loop, Debate, Map-reduce, Recursive solver. |
+| **Let agents grow the graph** | An agent allowed to spawn writes `<spawn name="…">subtask</spawn>` (or `block="…"`), and the helper appears on the canvas, works, and answers its creator. Bounded by a depth limit and a spawn budget; keep what the model invented with one click. |
 | **Pick the entry points** | Mark which agents receive the task. With none marked, every agent that has no incoming link starts the run. |
 | **Watch it run** | Per-node status and a live tail of the text being produced, an animated packet on every link that carries a message, a colour-matched transcript, round and token counters. |
 | **Share a configuration** | Copy the whole swarm, or just the agents you ticked, as JSON. Paste it into someone else's Swarm Studio and they get your setup — `Ctrl/⌘ + C`, `X` and `V` work on the canvas too, so cutting an agent puts it on the clipboard on its way out. API keys and endpoint URLs deliberately never travel. Format: [`docs/format.md`](docs/format.md). |
@@ -79,6 +88,15 @@ agents its author may speak to, and those become the next round's active set. Th
 nobody is left to speak or `maxRounds` is reached. Every agent keeps its own conversation history,
 so it remembers what it already said.
 
+That is a superstep machine, the model LangGraph also runs on. Version 2 widens it rather than
+replacing it: zero-token nodes act inside the round they are reached in, guards and loop budgets
+filter links, blocks run as nested graphs charged to the same step budget, and actions (`<route/>`,
+`<write/>`, `<spawn/>`) are tags parsed from the answer — the same on every provider, the demo one
+included. The design, with the reasons: [`docs/graph-engineering.md`](docs/graph-engineering.md).
+
+The engine imports nothing from the interface and touches no page global (a test keeps it that way),
+so it can run in Node behind an API the day agents need to run code or outlive a browser tab.
+
 Everything the UI animates comes out of engine callbacks (`onAgentStatus`, `onMessageDelta`,
 `onTransit`, …), so the visualisation never guesses: it draws exactly what the engine did.
 
@@ -86,13 +104,19 @@ Everything the UI animates comes out of engine callbacks (`onAgentStatus`, `onMe
 src/
   types.ts              domain model
   store.ts              zustand store, localStorage persistence
-  presets.ts            three starter swarms, and the demo voices that make them readable
+  presets.ts            six starter swarms
+  blocks.ts             built-in blocks
   theme.ts              Material theme + per-agent colour derivation
   engine/
-    providers.ts        one streaming adapter per provider
-    runner.ts           rounds, propagation rules, callbacks
-    runner.test.ts      pins the propagation rules
-  components/           TopBar · Inspector · GraphCanvas · AgentNode · MessageEdge · TranscriptPanel · RunBar
+    providers.ts        one streaming adapter per provider, and the demo voices
+    runner.ts           rounds, dispatch, zero-token nodes, gates, blocks, spawn, callbacks
+    predicates.ts       the condition language (data, never code)
+    actions.ts          <route/> <write/> <spawn/> parsing
+    memory.ts           shared memory: writes, and what a reader sees
+    graph.ts            reading a v1 or v2 graph the same way
+    portable.ts         the interchange format
+  components/           TopBar · Inspector · NodeInspector · GraphCanvas · AgentNode · FlowNodes ·
+                        MessageEdge · TranscriptPanel · MemoryPanel · BlockLibrary · GateDialog · RunBar
 ```
 
 ## Stack

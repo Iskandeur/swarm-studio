@@ -1,4 +1,5 @@
 import type { SwarmSpec } from './types'
+import { BUILTIN_BLOCKS } from './blocks'
 
 const mock = { provider: 'mock' as const, model: 'demo-fast', temperature: 0.7 }
 
@@ -160,6 +161,150 @@ export const PRESETS: SwarmSpec[] = [
       { id: 'l1', source: 'checker', target: 'writer' },
       { id: 'l2', source: 'writer', target: 'editor' },
     ],
+  },
+  /**
+   * Graph engineering in one office crime. A blackboard the detective writes and the court reads,
+   * two witnesses in parallel held by a join, a condition on the blackboard, and a human gate: the
+   * run stops and asks YOU before anyone is accused.
+   */
+  {
+    name: 'The Fridge Tribunal',
+    task: 'Someone ate the labelled yoghurt from the office fridge. Establish who, and pass sentence.',
+    topology: 'broadcast',
+    maxRounds: 8,
+    entryIds: ['detective'],
+    agents: [
+      {
+        id: 'detective',
+        name: 'The Detective',
+        ...mock,
+        systemPrompt:
+          'You investigate with the gravity of a murder case. Write what you establish to the Evidence board, one key per fact, and say one short line out loud.',
+        hue: 32,
+        position: { x: 0, y: 60 },
+      },
+      {
+        id: 'denise',
+        name: 'Witness: Denise',
+        ...mock,
+        systemPrompt: 'You own the yoghurt. You are calm in the way a volcano is calm. One or two sentences.',
+        hue: 300,
+        position: { x: 290, y: -40 },
+      },
+      {
+        id: 'gary',
+        name: 'Witness: Gary',
+        ...mock,
+        systemPrompt: 'You are Gary. You did it. You will never say so, and you answer everything with office jargon.',
+        hue: 132,
+        position: { x: 290, y: 160 },
+      },
+      {
+        id: 'prosecutor',
+        name: 'The Prosecutor',
+        ...mock,
+        systemPrompt: 'You read the Evidence board and the testimonies, and you make the case in two exhausted sentences.',
+        hue: 4,
+        position: { x: 700, y: 60 },
+      },
+      {
+        id: 'judge',
+        name: 'The Judge',
+        ...mock,
+        systemPrompt: 'You pass a sentence proportionate to a yoghurt, delivered as if it were not.',
+        hue: 262,
+        position: { x: 700, y: 300 },
+      },
+    ],
+    nodes: [
+      {
+        id: 'evidence',
+        kind: 'memory',
+        name: 'Evidence',
+        mode: 'blackboard',
+        wakeReaders: false,
+        maxChars: 2400,
+        seed: [{ key: 'label', value: 'PROPERTY OF DENISE — DO NOT', author: 'seed', round: 0, version: 1 }],
+        position: { x: 380, y: 340 },
+      },
+      { id: 'testimonies', kind: 'join', name: 'Both testimonies', mode: 'all', position: { x: 580, y: 40 } },
+      {
+        id: 'solid',
+        kind: 'condition',
+        name: 'Is there a suspect?',
+        predicate: { op: 'memory', memory: 'Evidence', key: 'suspect', cmp: 'exists' },
+        position: { x: 1000, y: 50 },
+      },
+      {
+        id: 'accuse',
+        kind: 'human',
+        name: 'Accuse Gary?',
+        prompt: 'The prosecution wants to name Gary in front of the whole office. Approve the accusation?',
+        position: { x: 1000, y: 250 },
+      },
+      { id: 'verdict', kind: 'output', name: 'Verdict', position: { x: 1000, y: 420 } },
+    ],
+    links: [
+      { id: 't1', source: 'detective', target: 'denise' },
+      { id: 't2', source: 'detective', target: 'gary' },
+      { id: 't3', source: 'denise', target: 'testimonies' },
+      { id: 't4', source: 'gary', target: 'testimonies' },
+      { id: 't5', source: 'testimonies', target: 'prosecutor' },
+      { id: 't6', source: 'prosecutor', target: 'solid' },
+      { id: 't7', source: 'solid', target: 'accuse', label: 'true' },
+      { id: 't8', source: 'solid', target: 'detective', label: 'false', maxTraversals: 1 },
+      { id: 't9', source: 'accuse', target: 'judge', label: 'approved' },
+      { id: 't11', source: 'judge', target: 'verdict' },
+      { id: 'a1', source: 'detective', target: 'evidence', kind: 'access', access: 'readwrite' },
+      { id: 'a2', source: 'evidence', target: 'prosecutor', kind: 'access' },
+      { id: 'a3', source: 'evidence', target: 'judge', kind: 'access' },
+    ],
+  },
+  /**
+   * Spawn, all the way down. One agent on the canvas; press Run and the org chart grows itself, until
+   * the depth limit refuses the intern and the manager has to go and look.
+   */
+  {
+    name: 'The Delegation Spiral',
+    task: 'Find out why the coffee machine is broken. One page.',
+    topology: 'broadcast',
+    maxRounds: 10,
+    maxDepth: 3,
+    maxSpawns: 6,
+    entryIds: ['ceo'],
+    agents: [
+      {
+        id: 'ceo',
+        name: 'The CEO',
+        ...mock,
+        canSpawn: true,
+        systemPrompt:
+          'You never do anything yourself. You delegate the task to one helper with a grand title, then you approve whatever comes back without reading it.',
+        hue: 48,
+        position: { x: 0, y: 0 },
+      },
+    ],
+    nodes: [{ id: 'deck', kind: 'output', name: 'Board deck', position: { x: 360, y: -160 } }],
+    links: [{ id: 's1', source: 'ceo', target: 'deck', guard: { op: 'contains', value: 'board deck' } }],
+  },
+  /**
+   * A block that contains itself. The solver either answers or hands a smaller question to a copy of
+   * itself one level down; the demo answers at the depth limit, and the merges climb back up.
+   */
+  {
+    name: 'The Recursive Excuse',
+    task: 'Explain why the quarterly report is late.',
+    topology: 'broadcast',
+    maxRounds: 20,
+    maxDepth: 3,
+    entryIds: ['why'],
+    agents: [],
+    nodes: [
+      { id: 'why', kind: 'block', name: 'Why is it late?', blockId: 'builtin-recursive-solver', position: { x: 0, y: 0 } },
+      { id: 'excuse', kind: 'output', name: 'The excuse', position: { x: 360, y: 10 } },
+    ],
+    links: [{ id: 'r1', source: 'why', target: 'excuse' }],
+    blocks: BUILTIN_BLOCKS.filter((b) => b.id === 'builtin-recursive-solver'),
   },
 ]
 

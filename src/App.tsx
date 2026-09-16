@@ -25,7 +25,7 @@ import TuneRoundedIcon from '@mui/icons-material/TuneRounded'
 import ForumRoundedIcon from '@mui/icons-material/ForumRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import StopRoundedIcon from '@mui/icons-material/StopRounded'
-import { ReactFlowProvider } from '@xyflow/react'
+import { Panel, ReactFlowProvider } from '@xyflow/react'
 import { buildTheme } from './theme'
 import { useStore } from './store'
 import { TopBar } from './components/TopBar'
@@ -36,6 +36,9 @@ import { RunBar } from './components/RunBar'
 import { SettingsDialog } from './components/SettingsDialog'
 import { ShareDialog } from './components/ShareDialog'
 import { SHORTCUTS, useHotkeys } from './components/useHotkeys'
+import { NodePalette } from './components/NodePalette'
+import { BlockLibrary } from './components/BlockLibrary'
+import { GateDialog } from './components/GateDialog'
 
 type Sheet = 'agents' | 'setup' | 'log' | null
 
@@ -61,6 +64,8 @@ export default function App() {
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <ShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} />
+      {/* A human gate stops the run wherever you are looking, so its question is app-wide. */}
+      <GateDialog />
       {/* A model refusing a parameter is not a failure, so it must not look like one — but it has
           to be visible, or the slider silently lies about what was sent. */}
       <Snackbar
@@ -150,10 +155,18 @@ function Shell({
   )
 }
 
-function Canvas({ onAgentOpen }: { onAgentOpen?: () => void } = {}) {
+function Canvas({ onAgentOpen, compact = false }: { onAgentOpen?: () => void; compact?: boolean } = {}) {
+  const [libraryOpen, setLibraryOpen] = useState(false)
   return (
     <ReactFlowProvider>
-      <GraphCanvas onAgentOpen={onAgentOpen} />
+      <GraphCanvas onAgentOpen={onAgentOpen}>
+        {/* On the canvas, not in a side panel: adding a node is a canvas gesture, and on a phone
+            the panels are sheets that would cover the place the node appears. */}
+        <Panel position="top-left">
+          <NodePalette compact={compact} onOpenLibrary={() => setLibraryOpen(true)} />
+        </Panel>
+      </GraphCanvas>
+      <BlockLibrary open={libraryOpen} onClose={() => setLibraryOpen(false)} />
     </ReactFlowProvider>
   )
 }
@@ -197,7 +210,7 @@ function MobileBody() {
   return (
     <>
       <Box sx={{ flex: 1, minHeight: 0 }}>
-        <Canvas onAgentOpen={() => setSheet('agents')} />
+        <Canvas compact onAgentOpen={() => setSheet('agents')} />
       </Box>
 
       <Paper elevation={0} square sx={{ borderTop: '1px solid', borderColor: 'divider', flexShrink: 0 }}>

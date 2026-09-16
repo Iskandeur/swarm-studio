@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict'
 import { test, beforeEach } from 'vitest'
-import { useStore } from './store'
+import { allBlocks, useStore } from './store'
 import { PRESETS } from './presets'
 
 // Derived, never hardcoded. A preset is CONTENT and it gets rewritten; a store test that names
@@ -173,3 +173,161 @@ test('a non-text field on the same agent IS undoable', () => {
   useStore.getState().undo()
   assert.equal(spec().agents.find((a) => a.id === target)!.temperature, before)
 })
+
+// ——— Version 2: nodes, typed links, blocks, spawned helpers ———
+
+const nodes = () => spec().nodes ?? []
+
+test('a link touching a memory becomes an access link, and only an agent may sit at the other end', () => {
+  const memory = useStore.getState().addNode('memory')
+  const condition = useStore.getState().addNode('condition')
+
+  useStore.getState().addLink(FIRST, memory)
+  const access = spec().links.find((l) => l.target === memory)!
+  assert.equal(access.kind, 'access')
+
+  useStore.getState().addLink(condition, memory)
+  assert.equal(spec().links.some((l) => l.source === condition && l.target === memory), false)
+  assert.match(useStore.getState().notice ?? '', /agents only/)
+
+  // Drawing the other direction too means read AND write, on the same link.
+  useStore.getState().addLink(memory, FIRST)
+  const links = spec().links.filter((l) => l.kind === 'access')
+  assert.equal(links.length, 1)
+  assert.equal(links[0].access, 'readwrite')
+})
+
+test('a condition labels its first two links true and false, a gate approved and rejected', () => {
+  const condition = useStore.getState().addNode('condition')
+  const gate = useStore.getState().addNode('human')
+  useStore.getState().addLink(condition, FIRST)
+  useStore.getState().addLink(condition, SECOND)
+  useStore.getState().addLink(gate, FIRST)
+  useStore.getState().addLink(gate, THIRD)
+  const labels = (source: string) => spec().links.filter((l) => l.source === source).map((l) => l.label)
+  assert.deepEqual(labels(condition), ['true', 'false'])
+  assert.deepEqual(labels(gate), ['approved', 'rejected'])
+})
+
+test('nothing leaves an output', () => {
+  const output = useStore.getState().addNode('output')
+  const before = spec().links.length
+  useStore.getState().addLink(output, FIRST)
+  assert.equal(spec().links.length, before)
+})
+
+test('clearing a link field removes the key instead of storing undefined', () => {
+  const link = spec().links[0]
+  useStore.getState().updateLink(link.id, { maxTraversals: 3, guard: { op: 'contains', value: 'x' } })
+  useStore.getState().updateLink(link.id, { maxTraversals: undefined, guard: undefined })
+  const now = spec().links.find((l) => l.id === link.id)!
+  assert.equal('maxTraversals' in now, false)
+  assert.equal('guard' in now, false)
+})
+
+test('deleting a node takes its links and its entry flag with it', () => {
+  const join = useStore.getState().addNode('join')
+  useStore.getState().addLink(FIRST, join)
+  useStore.getState().toggleEntry(join)
+  useStore.getState().removeAgents([join])
+  assert.equal(nodes().some((n) => n.id === join), false)
+  assert.equal(spec().links.some((l) => l.source === join || l.target === join), false)
+  assert.equal(spec().entryIds.includes(join), false)
+})
+
+test('inserting a built-in block copies its definition into the swarm, once', () => {
+  const def = allBlocks(spec(), []).find((b) => b.id === 'builtin-debate')!
+  useStore.getState().insertBlock(def)
+  useStore.getState().insertBlock(def)
+  assert.equal(nodes().filter((n) => n.kind === 'block').length, 2)
+  assert.equal((spec().blocks ?? []).filter((b) => b.id === 'builtin-debate').length, 1)
+})
+
+test('editing inside a block edits its definition, and the swarm itself is untouched', () => {
+  const def = allBlocks(spec(), []).find((b) => b.id === 'builtin-debate')!
+  useStore.getState().insertBlock(def)
+  const agentsBefore = spec().agents.length
+  useStore.getState().openBlock('builtin-debate')
+  useStore.getState().addAgent()
+  assert.equal(spec().agents.length, agentsBefore, 'the swarm did not grow')
+  const inside = spec().blocks!.find((b) => b.id === 'builtin-debate')!.graph.agents
+  assert.equal(inside.length, def.graph.agents.length + 1, 'the block did')
+  useStore.getState().openBlock(undefined)
+  assert.equal(useStore.getState().editingBlockId, undefined)
+})
+
+test('saving a selection as a block keeps the links between the chosen nodes only', () => {
+  const saved = useStore.getState().saveBlock([FIRST, SECOND], 'Duo', 'two of them')!
+  assert.ok(saved)
+  assert.deepEqual(saved.graph.agents.map((a) => a.id).sort(), [FIRST, SECOND].sort())
+  for (const link of saved.graph.links) {
+    assert.ok([FIRST, SECOND].includes(link.source) && [FIRST, SECOND].includes(link.target))
+  }
+  assert.ok(useStore.getState().library.some((b) => b.id === saved.id), 'in this browser')
+  assert.ok(spec().blocks?.some((b) => b.id === saved.id), 'and in the swarm')
+  assert.equal(JSON.parse(localStorage.getItem('swarm-studio.blocks.v1') ?? '[]').length, 1)
+})
+
+test('detaching a block puts its agents inline and rewires what went in and out', () => {
+  const def = allBlocks(spec(), []).find((b) => b.id === 'builtin-debate')!
+  const block = useStore.getState().insertBlock(def)
+  useStore.getState().addLink(FIRST, block)
+  useStore.getState().addLink(block, SECOND)
+  const agentsBefore = spec().agents.length
+
+  useStore.getState().detachBlock(block)
+
+  assert.equal(nodes().some((n) => n.id === block), false)
+  assert.equal(spec().agents.length, agentsBefore + def.graph.agents.length)
+  const ids = new Set([...spec().agents.map((a) => a.id), ...nodes().map((n) => n.id)])
+  for (const link of spec().links) assert.ok(ids.has(link.source) && ids.has(link.target), `dangling ${link.id}`)
+  // Into the two debaters, out of the judge (the block's Output node is gone, its source takes over).
+  const into = spec().links.filter((l) => l.source === FIRST && spec().agents.some((a) => a.id === l.target && a.name.startsWith('Debate')))
+  assert.equal(into.length, 2)
+  const outOf = spec().links.filter((l) => l.target === SECOND && spec().agents.find((a) => a.id === l.source)?.name === 'Debate Judge')
+  assert.equal(outOf.length, 1)
+  assert.equal(nodes().some((n) => n.kind === 'output'), false)
+})
+
+test('keeping spawned helpers turns them into ordinary agents with a plain link', () => {
+  const parent = spec().agents[0]
+  useStore.setState({
+    runGraph: {
+      agents: [{ ...parent, id: `${parent.id}~s1`, name: 'Helper', position: { x: 1, y: 1 } }],
+      nodes: [],
+      links: [{ id: `${parent.id}~l1`, source: parent.id, target: `${parent.id}~s1`, label: 'spawned' }],
+    },
+  })
+  const kept = useStore.getState().keepSpawned()
+  assert.equal(kept, 1)
+  const helper = spec().agents.find((a) => a.name === 'Helper')!
+  assert.ok(!helper.id.includes('~'))
+  const link = spec().links.find((l) => l.target === helper.id)!
+  assert.equal(link.source, parent.id)
+  assert.equal('label' in link, false)
+  assert.equal(useStore.getState().runGraph.agents.length, 0)
+})
+
+test('undo brings a deleted node back', () => {
+  const memory = useStore.getState().addNode('memory')
+  useStore.getState().removeAgents([memory])
+  useStore.getState().undo()
+  assert.ok(nodes().some((n) => n.id === memory))
+})
+
+test('typing a link budget is one undo step, not one per keystroke', () => {
+  const link = spec().links[0]
+  const depth = useStore.getState().past.length
+  for (const value of [1, 12, 120]) useStore.getState().updateLink(link.id, { maxTraversals: value })
+  assert.equal(useStore.getState().past.length, depth + 1, 'the burst is one step')
+  useStore.getState().undo()
+  assert.equal('maxTraversals' in spec().links.find((l) => l.id === link.id)!, false, 'and undo takes all of it back')
+})
+
+test('clearing a node field removes the key', () => {
+  const join = useStore.getState().addNode('join')
+  useStore.getState().updateNode(join, { timeoutRounds: 3 } as never)
+  useStore.getState().updateNode(join, { timeoutRounds: undefined } as never)
+  assert.equal('timeoutRounds' in nodes().find((n) => n.id === join)!, false)
+})
+

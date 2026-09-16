@@ -4,6 +4,8 @@ import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded'
 import CheckRoundedIcon from '@mui/icons-material/CheckRounded'
+import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded'
+import AltRouteRoundedIcon from '@mui/icons-material/AltRouteRounded'
 import type { AgentStatus } from '../types'
 import { agentColor, agentGlow } from '../theme'
 import { useStore } from '../store'
@@ -17,6 +19,11 @@ export type AgentNodeData = {
   isEntry: boolean
   /** Tail of the message being produced right now, so the node itself shows life. */
   live: string
+  /** Spawned by a run: it exists until the next reset, unless you keep it. */
+  ephemeral?: boolean
+  canSpawn?: boolean
+  /** Picks its own branch among its labelled links. */
+  chooses?: boolean
 }
 
 export type AgentFlowNode = Node<AgentNodeData, 'agent'>
@@ -28,6 +35,7 @@ const STATUS_LABEL: Record<AgentStatus, string> = {
   speaking: 'speaking',
   done: 'done',
   error: 'error',
+  waiting: 'waiting',
 }
 
 export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
@@ -49,8 +57,8 @@ export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
         px: 1.75,
         py: 1.5,
         borderRadius: 4,
-        border: '1px solid',
-        borderColor: selected ? color : theme.palette.divider,
+        border: data.ephemeral ? '1.5px dashed' : '1px solid',
+        borderColor: selected || data.ephemeral ? color : theme.palette.divider,
         outline: selected ? `1px solid ${color}` : 'none',
         overflow: 'hidden',
         transition: 'box-shadow .25s ease, border-color .25s ease, transform .25s ease',
@@ -87,7 +95,7 @@ export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
         />
       )}
 
-      <Tooltip title={`Delete ${data.name}`}>
+      {!data.ephemeral && <Tooltip title={`Delete ${data.name}`}>
         <IconButton
           size="small"
           aria-label={`Delete node ${data.name}`}
@@ -113,7 +121,7 @@ export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
         >
           <CloseRoundedIcon sx={{ fontSize: 14 }} />
         </IconButton>
-      </Tooltip>
+      </Tooltip>}
 
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75, pr: 2.5 }}>
         <Box
@@ -137,6 +145,8 @@ export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
         {data.isEntry && (
           <BoltRoundedIcon sx={{ fontSize: 16, color }} titleAccess="receives the task" />
         )}
+        {data.canSpawn && <AccountTreeRoundedIcon sx={{ fontSize: 15, opacity: 0.6 }} titleAccess="may spawn helpers" />}
+        {data.chooses && <AltRouteRoundedIcon sx={{ fontSize: 15, opacity: 0.6 }} titleAccess="chooses its branch" />}
         {data.status === 'done' && <CheckRoundedIcon sx={{ fontSize: 16, opacity: 0.55 }} />}
         {data.status === 'error' && <ErrorOutlineRoundedIcon color="error" sx={{ fontSize: 16 }} />}
       </Box>
@@ -154,7 +164,7 @@ export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
           }}
         />
         <Typography variant="caption" sx={{ opacity: 0.55 }}>
-          {data.provider}
+          {data.ephemeral ? 'spawned' : data.provider}
         </Typography>
       </Box>
 

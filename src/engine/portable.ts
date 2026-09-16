@@ -6,20 +6,45 @@
  * things that must never travel — API keys, and endpoint URLs, which are private infrastructure.
  *
  * Two shapes, one reader:
- *  · `kind: "swarm"` — a whole graph (agents, links, topology, task, round budget, entry points)
- *  · `kind: "agents"` — a clipping of one or more agents, with the links BETWEEN them
+ *  · `kind: "swarm"` — a whole graph (agents, nodes, links, blocks, topology, task, budgets, entries)
+ *  · `kind: "agents"` — a clipping of agents and nodes, with the links BETWEEN them
  *
  * `parsePortable` is deliberately forgiving on the way in and strict about what it returns: it
  * accepts a bare exported spec from an older version, an agent object on its own, or an array of
  * agents, and it always answers with a discriminated union — never a half-filled object. Every
  * refusal carries a sentence a human can act on, because the only place this is used is a paste box.
+ *
+ * Version 2 adds flow nodes, conditional links, access links and block definitions. Version 1 reads
+ * unchanged: it is a version-2 graph with none of those.
  */
-import type { Agent, Link, ProviderId, SwarmSpec, Topology } from '../types.ts'
+import type {
+  Access,
+  Agent,
+  BlockDef,
+  BlockNode,
+  Dispatch,
+  FlowNode,
+  Graph,
+  Link,
+  MemoryEntry,
+  MemoryMode,
+  ProviderId,
+  SwarmSpec,
+  Topology,
+} from '../types.ts'
+import { DEFAULT_MEMORY_CHARS } from '../types.ts'
+import { readPredicate } from './predicates.ts'
 
-export const PORTABLE_VERSION = 1
+export const PORTABLE_VERSION = 2
 const TOPOLOGIES: Topology[] = ['broadcast', 'round-robin', 'manager']
 const PROVIDERS: ProviderId[] = ['mock', 'openai', 'anthropic', 'openrouter', 'custom']
+const DISPATCHES: Dispatch[] = ['inherit', 'all', 'rotate', 'choose']
+const MEMORY_MODES: MemoryMode[] = ['blackboard', 'log', 'document']
+const ACCESSES: Access[] = ['read', 'write', 'readwrite']
 const HUES = [262, 168, 4, 32, 210, 300, 132, 48]
+/** A pasted document is welcome as a knowledge base, a pasted novel per entry is not. */
+const MAX_SEED_VALUE = 50_000
+const MAX_SEED_ENTRIES = 500
 
 export interface PortableSwarm {
   format: 'swarm-studio'
@@ -29,9 +54,13 @@ export interface PortableSwarm {
   task: string
   topology: Topology
   maxRounds: number
+  maxDepth?: number
+  maxSpawns?: number
   entryIds: string[]
   agents: Agent[]
+  nodes: FlowNode[]
   links: Link[]
+  blocks: BlockDef[]
 }
 
 export interface PortableAgents {
@@ -39,7 +68,10 @@ export interface PortableAgents {
   version: number
   kind: 'agents'
   agents: Agent[]
+  nodes: FlowNode[]
   links: Link[]
+  /** Definitions of the blocks the clipped block nodes use, so the paste is self-sufficient. */
+  blocks: BlockDef[]
 }
 
 export type Portable = PortableSwarm | PortableAgents
@@ -55,25 +87,33 @@ export function exportSwarm(spec: SwarmSpec): string {
     task: spec.task,
     topology: spec.topology,
     maxRounds: spec.maxRounds,
+    ...(spec.maxDepth !== undefined ? { maxDepth: spec.maxDepth } : {}),
+    ...(spec.maxSpawns !== undefined ? { maxSpawns: spec.maxSpawns } : {}),
     entryIds: spec.entryIds,
     agents: spec.agents,
+    nodes: spec.nodes ?? [],
     links: spec.links,
+    blocks: spec.blocks ?? [],
   }
   return JSON.stringify(payload, null, 2)
 }
 
 /**
- * A clipping of agents. Links are included only when BOTH ends are in the selection — a link to an
- * agent the recipient does not have would be a reference to nothing.
+ * A clipping of agents and nodes. Links are included only when BOTH ends are in the selection — a
+ * link to something the recipient does not have would be a reference to nothing.
  */
 export function exportAgents(spec: SwarmSpec, ids: string[]): string {
   const keep = new Set(ids)
+  const nodes = (spec.nodes ?? []).filter((n) => keep.has(n.id))
+  const used = new Set(nodes.filter((n): n is BlockNode => n.kind === 'block').map((n) => n.blockId))
   const payload: PortableAgents = {
     format: 'swarm-studio',
     version: PORTABLE_VERSION,
     kind: 'agents',
     agents: spec.agents.filter((a) => keep.has(a.id)),
+    nodes,
     links: spec.links.filter((l) => keep.has(l.source) && keep.has(l.target)),
+    blocks: (spec.blocks ?? []).filter((b) => used.has(b.id)),
   }
   return JSON.stringify(payload, null, 2)
 }
@@ -82,17 +122,29 @@ function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
 }
 
+function asFinite(value: unknown): number | undefined {
+  if (value === null || value === '' || typeof value === 'boolean') return undefined
+  const n = Number(value)
+  return Number.isFinite(n) ? n : undefined
+}
+
+function readPosition(raw: unknown, index: number): { x: number; y: number } {
+  const position = raw as { x?: unknown; y?: unknown } | undefined
+  return {
+    x: asFinite(position?.x) ?? 80 + (index % 3) * 260,
+    y: asFinite(position?.y) ?? 60 + Math.floor(index / 3) * 180,
+  }
+}
+
 function readAgent(raw: unknown, index: number): Agent | string {
   if (!raw || typeof raw !== 'object') return `agent #${index + 1} is not an object`
   const record = raw as Record<string, unknown>
   const name = asString(record.name).trim()
   if (!name) return `agent #${index + 1} has no name`
-  const provider = PROVIDERS.includes(record.provider as ProviderId)
-    ? (record.provider as ProviderId)
-    : 'mock'
-  const position = record.position as { x?: unknown; y?: unknown } | undefined
-  const temperature = Number(record.temperature)
-  return {
+  const provider = PROVIDERS.includes(record.provider as ProviderId) ? (record.provider as ProviderId) : 'mock'
+  const temperature = asFinite(record.temperature)
+  const maxTokens = asFinite(record.maxTokens)
+  const agent: Agent = {
     // A pasted id may collide with one already on the canvas; the caller re-keys.
     id: asString(record.id) || `p${index}`,
     name,
@@ -100,18 +152,102 @@ function readAgent(raw: unknown, index: number): Agent | string {
     model: asString(record.model),
     systemPrompt: asString(record.systemPrompt),
     // Clamped, not trusted: a hand-edited 9.9 would be refused by every provider at run time.
-    temperature: Number.isFinite(temperature) ? Math.min(2, Math.max(0, temperature)) : 0.7,
-    hue: Number.isFinite(Number(record.hue)) ? Number(record.hue) : HUES[index % HUES.length],
-    position: {
-      x: Number.isFinite(Number(position?.x)) ? Number(position?.x) : 80 + (index % 3) * 260,
-      y: Number.isFinite(Number(position?.y)) ? Number(position?.y) : 60 + Math.floor(index / 3) * 180,
-    },
+    temperature: temperature !== undefined ? Math.min(2, Math.max(0, temperature)) : 0.7,
+    hue: asFinite(record.hue) ?? HUES[index % HUES.length],
+    position: readPosition(record.position, index),
+  }
+  // Optional fields are only written when present: a round trip must give back the same object.
+  if (maxTokens !== undefined && maxTokens >= 1) agent.maxTokens = Math.floor(maxTokens)
+  if (DISPATCHES.includes(record.dispatch as Dispatch)) agent.dispatch = record.dispatch as Dispatch
+  if (typeof record.canSpawn === 'boolean') agent.canSpawn = record.canSpawn
+  return agent
+}
+
+function readSeed(raw: unknown): MemoryEntry[] {
+  if (!Array.isArray(raw)) return []
+  const entries: MemoryEntry[] = []
+  for (const item of raw.slice(0, MAX_SEED_ENTRIES)) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    const value = asString(record.value)
+    if (!value) continue
+    entries.push({
+      key: asString(record.key),
+      value: value.slice(0, MAX_SEED_VALUE),
+      author: asString(record.author, 'seed') || 'seed',
+      round: 0,
+      version: Math.max(1, Math.floor(asFinite(record.version) ?? 1)),
+    })
+  }
+  return entries
+}
+
+function readFlowNode(raw: unknown, index: number): FlowNode | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const record = raw as Record<string, unknown>
+  const id = asString(record.id) || `n${index}`
+  const position = readPosition(record.position, index)
+  const kind = record.kind
+  const named = (fallback: string) => asString(record.name).trim() || fallback
+  switch (kind) {
+    case 'condition':
+      return { id, kind, name: named('Condition'), position, predicate: readPredicate(record.predicate) ?? { op: 'always' } }
+    case 'join': {
+      const timeout = asFinite(record.timeoutRounds)
+      return {
+        id,
+        kind,
+        name: named('Join'),
+        position,
+        mode: record.mode === 'any' ? 'any' : 'all',
+        ...(timeout !== undefined && timeout >= 1 ? { timeoutRounds: Math.floor(timeout) } : {}),
+      }
+    }
+    case 'output':
+      return { id, kind, name: named('Output'), position }
+    case 'human':
+      return { id, kind, name: named('Human gate'), position, prompt: asString(record.prompt) }
+    case 'memory': {
+      const chars = asFinite(record.maxChars)
+      return {
+        id,
+        kind,
+        name: named('Memory'),
+        position,
+        mode: MEMORY_MODES.includes(record.mode as MemoryMode) ? (record.mode as MemoryMode) : 'blackboard',
+        wakeReaders: record.wakeReaders === true,
+        seed: readSeed(record.seed),
+        maxChars: chars !== undefined && chars >= 200 ? Math.min(40_000, Math.floor(chars)) : DEFAULT_MEMORY_CHARS,
+      }
+    }
+    case 'block': {
+      const blockId = asString(record.blockId)
+      if (!blockId) return undefined
+      const overrides = record.overrides as Record<string, unknown> | undefined
+      const node: BlockNode = { id, kind, name: named('Block'), position, blockId }
+      if (overrides && typeof overrides === 'object') {
+        const clean: NonNullable<BlockNode['overrides']> = {}
+        if (PROVIDERS.includes(overrides.provider as ProviderId)) clean.provider = overrides.provider as ProviderId
+        if (typeof overrides.model === 'string' && overrides.model) clean.model = overrides.model
+        if (Object.keys(clean).length > 0) node.overrides = clean
+      }
+      return node
+    }
+    default:
+      return undefined
   }
 }
 
-/** Keeps only links whose two ends exist, so nothing pasted can reference a missing agent. */
-function readLinks(raw: unknown, known: Set<string>): Link[] {
+/**
+ * Keeps only links that make sense on this graph.
+ *
+ * A message link needs two ends that can speak or relay (not a memory). An access link needs exactly
+ * one memory and one agent. A self-loop and a duplicate are dropped.
+ */
+function readLinks(raw: unknown, agents: Set<string>, nodes: FlowNode[]): Link[] {
   if (!Array.isArray(raw)) return []
+  const memories = new Set(nodes.filter((n) => n.kind === 'memory').map((n) => n.id))
+  const known = new Set([...agents, ...nodes.map((n) => n.id)])
   const links: Link[] = []
   const seen = new Set<string>()
   raw.forEach((entry, index) => {
@@ -120,12 +256,95 @@ function readLinks(raw: unknown, known: Set<string>): Link[] {
     const source = asString(record.source)
     const target = asString(record.target)
     if (!known.has(source) || !known.has(target) || source === target) return
-    const pair = `${source}>${target}`
+    const kind = record.kind === 'access' ? 'access' : 'message'
+    if (kind === 'access') {
+      const valid = (memories.has(source) && agents.has(target)) || (memories.has(target) && agents.has(source))
+      if (!valid) return
+    } else if (memories.has(source) || memories.has(target)) {
+      return
+    }
+    const pair = `${kind}:${source}>${target}`
     if (seen.has(pair)) return
     seen.add(pair)
-    links.push({ id: asString(record.id) || `pl${index}`, source, target })
+    const link: Link = { id: asString(record.id) || `pl${index}`, source, target }
+    if (kind === 'access') {
+      link.kind = 'access'
+      if (ACCESSES.includes(record.access as Access)) link.access = record.access as Access
+    } else if (record.kind === 'message') {
+      link.kind = 'message'
+    }
+    const label = asString(record.label).trim()
+    if (label) link.label = label
+    const guard = record.guard === undefined ? undefined : readPredicate(record.guard)
+    if (guard) link.guard = guard
+    if (record.isDefault === true) link.isDefault = true
+    const budget = asFinite(record.maxTraversals)
+    if (budget !== undefined && budget >= 1) link.maxTraversals = Math.floor(budget)
+    links.push(link)
   })
   return links
+}
+
+interface GraphRead {
+  agents: Agent[]
+  nodes: FlowNode[]
+  links: Link[]
+}
+
+function readGraphParts(record: Record<string, unknown>, what: string, allowEmpty: boolean): GraphRead | string {
+  const rawAgents = Array.isArray(record.agents) ? record.agents : []
+  const rawNodes = Array.isArray(record.nodes) ? record.nodes : []
+  if (rawAgents.length === 0 && (rawNodes.length === 0 || !allowEmpty)) {
+    return `${what} contains no agents.`
+  }
+  const agents: Agent[] = []
+  for (const [index, raw] of rawAgents.entries()) {
+    const parsed = readAgent(raw, index)
+    if (typeof parsed === 'string') return parsed
+    agents.push(parsed)
+  }
+  const agentIds = new Set(agents.map((a) => a.id))
+  const nodes: FlowNode[] = []
+  const taken = new Set(agentIds)
+  rawNodes.forEach((raw, index) => {
+    const node = readFlowNode(raw, index)
+    // An id shared with an agent would make every lookup ambiguous.
+    if (!node || taken.has(node.id)) return
+    taken.add(node.id)
+    nodes.push(node)
+  })
+  return { agents, nodes, links: readLinks(record.links, agentIds, nodes) }
+}
+
+function readEntryIds(raw: unknown, known: Set<string>): string[] {
+  // An entry id that names nothing would make the run start nowhere.
+  return Array.isArray(raw) ? raw.map(String).filter((id) => known.has(id)) : []
+}
+
+function readBlocks(raw: unknown): BlockDef[] {
+  if (!Array.isArray(raw)) return []
+  const blocks: BlockDef[] = []
+  const ids = new Set<string>()
+  raw.forEach((item, index) => {
+    if (!item || typeof item !== 'object') return
+    const record = item as Record<string, unknown>
+    const id = asString(record.id) || `b${index}`
+    if (ids.has(id)) return
+    const graphRecord = (record.graph && typeof record.graph === 'object' ? record.graph : {}) as Record<string, unknown>
+    const parts = readGraphParts(graphRecord, 'a block', true)
+    // A block that cannot be read is dropped rather than failing the whole paste.
+    if (typeof parts === 'string') return
+    const known = new Set([...parts.agents.map((a) => a.id), ...parts.nodes.map((n) => n.id)])
+    const graph: Graph = { ...parts, entryIds: readEntryIds(graphRecord.entryIds, known) }
+    ids.add(id)
+    blocks.push({
+      id,
+      name: asString(record.name).trim() || `Block ${index + 1}`,
+      description: asString(record.description),
+      graph,
+    })
+  })
+  return blocks
 }
 
 /**
@@ -175,35 +394,28 @@ export function parsePortable(text: string): ParseResult {
 }
 
 function readAgentsPayload(record: Record<string, unknown>, what: string): ParseResult {
-  const rawAgents = record.agents
-  if (!Array.isArray(rawAgents) || rawAgents.length === 0) {
-    return { ok: false, error: `${what} contains no agents.` }
-  }
-  const agents: Agent[] = []
-  for (const [index, raw] of rawAgents.entries()) {
-    const parsed = readAgent(raw, index)
-    if (typeof parsed === 'string') return { ok: false, error: parsed }
-    agents.push(parsed)
-  }
-  const known = new Set(agents.map((a) => a.id))
+  // A clipping may be only nodes (a memory and a condition, say), but never nothing.
+  const parts = readGraphParts(record, what, true)
+  if (typeof parts === 'string') return { ok: false, error: parts }
   return {
     ok: true,
     value: {
       format: 'swarm-studio',
       version: PORTABLE_VERSION,
       kind: 'agents',
-      agents,
-      links: readLinks(record.links, known),
+      ...parts,
+      blocks: readBlocks(record.blocks),
     },
   }
 }
 
 function readSwarmPayload(record: Record<string, unknown>): ParseResult {
-  const parsed = readAgentsPayload(record, 'the pasted swarm')
-  if (!parsed.ok) return parsed
-  const { agents, links } = parsed.value
-  const known = new Set(agents.map((a) => a.id))
-  const rounds = Number(record.maxRounds)
+  const parts = readGraphParts(record, 'the pasted swarm', true)
+  if (typeof parts === 'string') return { ok: false, error: parts }
+  const known = new Set([...parts.agents.map((a) => a.id), ...parts.nodes.map((n) => n.id)])
+  const rounds = asFinite(record.maxRounds)
+  const depth = asFinite(record.maxDepth)
+  const spawns = asFinite(record.maxSpawns)
   return {
     ok: true,
     value: {
@@ -213,13 +425,20 @@ function readSwarmPayload(record: Record<string, unknown>): ParseResult {
       name: asString(record.name, 'Pasted swarm'),
       task: asString(record.task),
       topology: TOPOLOGIES.includes(record.topology as Topology) ? (record.topology as Topology) : 'broadcast',
-      maxRounds: Number.isFinite(rounds) && rounds >= 1 ? Math.floor(rounds) : 4,
-      // An entry id that names no agent would make the run start nowhere.
-      entryIds: Array.isArray(record.entryIds) ? record.entryIds.filter((id): id is string => known.has(String(id))) : [],
-      agents,
-      links,
+      maxRounds: rounds !== undefined && rounds >= 1 ? Math.floor(rounds) : 4,
+      ...(depth !== undefined && depth >= 0 ? { maxDepth: Math.min(8, Math.floor(depth)) } : {}),
+      ...(spawns !== undefined && spawns >= 0 ? { maxSpawns: Math.min(100, Math.floor(spawns)) } : {}),
+      entryIds: readEntryIds(record.entryIds, known),
+      ...parts,
+      blocks: readBlocks(record.blocks),
     },
   }
+}
+
+/** A parsed swarm as a spec the store can hold. */
+export function portableToSpec(value: PortableSwarm): SwarmSpec {
+  const { format: _format, version: _version, kind: _kind, ...spec } = value
+  return spec
 }
 
 /**
@@ -227,11 +446,11 @@ function readSwarmPayload(record: Record<string, unknown>): ParseResult {
  * Offsets positions too, so a paste of the same agent twice does not stack invisibly.
  */
 export function rekey(
-  incoming: { agents: Agent[]; links: Link[] },
+  incoming: { agents: Agent[]; links: Link[]; nodes?: FlowNode[] },
   taken: Set<string>,
   mint: (index: number) => string,
   offset = 40,
-): { agents: Agent[]; links: Link[] } {
+): { agents: Agent[]; links: Link[]; nodes: FlowNode[] } {
   const map = new Map<string, string>()
   const agents = incoming.agents.map((agent, index) => {
     const id = taken.has(agent.id) ? mint(index) : agent.id
@@ -244,10 +463,21 @@ export function rekey(
         : agent.position,
     }
   })
+  const base = incoming.agents.length
+  const nodes = (incoming.nodes ?? []).map((node, index) => {
+    const id = taken.has(node.id) ? mint(base + index) : node.id
+    map.set(node.id, id)
+    return {
+      ...node,
+      id,
+      position: taken.has(node.id) ? { x: node.position.x + offset, y: node.position.y + offset } : node.position,
+    }
+  })
   const links = incoming.links.map((link, index) => ({
+    ...link,
     id: `${mint(index)}l`,
     source: map.get(link.source) ?? link.source,
     target: map.get(link.target) ?? link.target,
   }))
-  return { agents, links }
+  return { agents, links, nodes }
 }
