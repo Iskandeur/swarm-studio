@@ -487,6 +487,10 @@ export function demoVoiceFor(system: string): string[] {
 async function mock(req: ChatRequest): Promise<ChatResult> {
   const voice = demoVoiceFor(req.system)
   const inCharacter = voice !== LOREM
+  // At the deepest level of a recursive block, a character answers with its LAST line: the demo's
+  // stand-in for a model reading "at the limit, answer directly" in its prompt.
+  const nesting = /at nesting depth (\d+) \(the limit is (\d+)\)/.exec(req.system)
+  const deepest = Boolean(nesting && Number(nesting[1]) >= Number(nesting[2]))
   const seed = req.system.length + req.messages.length * 7 + req.model.length
   // In character, one line IS the answer; the generic filler needs a few to look like a paragraph.
   const sentences = inCharacter ? 1 : req.model === 'demo-terse' ? 1 : req.model === 'demo-verbose' ? 4 : 2
@@ -494,7 +498,8 @@ async function mock(req: ChatRequest): Promise<ChatResult> {
   // The turn number picks the line, so an agent that speaks twice does not repeat itself.
   const turn = req.messages.filter((m) => m.role === 'assistant').length
   for (let i = 0; i < sentences; i++) {
-    parts.push(inCharacter ? voice[(turn + i) % voice.length] : voice[(seed + i * 3) % voice.length])
+    const line = deepest ? voice.length - 1 : (turn + i) % voice.length
+    parts.push(inCharacter ? voice[line] : voice[(seed + i * 3) % voice.length])
   }
   const full = parts.join(' ')
   const step = req.model === 'demo-fast' ? 6 : 3
@@ -523,7 +528,8 @@ export function callProvider(provider: ProviderId, req: ChatRequest): Promise<Ch
     case 'openrouter':
       return chatCompletions(
         req,
-        { 'HTTP-Referer': window.location.origin, 'X-Title': 'Swarm Studio' },
+        // Guarded: the engine must also run where there is no page (a server, one day).
+        { 'HTTP-Referer': typeof location !== 'undefined' ? location.origin : 'https://github.com/Iskandeur/swarm-studio', 'X-Title': 'Swarm Studio' },
         provider,
       )
   }

@@ -28,6 +28,7 @@ const STATUS_LABEL: Record<AgentStatus, string> = {
   speaking: 'speaking',
   done: 'done',
   error: 'error',
+  waiting: 'waiting',
 }
 
 export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
