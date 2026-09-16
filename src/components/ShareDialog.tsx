@@ -15,7 +15,7 @@ import {
 import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import CheckRoundedIcon from '@mui/icons-material/CheckRounded'
 import { useStore } from '../store'
-import { exportAgents, exportSwarm, parsePortable } from '../engine/portable'
+import { exportAgents, exportSwarm, parsePortable, portableToSpec } from '../engine/portable'
 
 /**
  * Share and receive a configuration.
@@ -61,10 +61,9 @@ export function ShareDialog({ open, onClose }: { open: boolean; onClose: () => v
     if (!result.ok) return setProblem(result.error)
     setProblem(null)
     if (result.value.kind === 'swarm') {
-      const { name, task, topology, maxRounds, entryIds, agents, links } = result.value
-      replaceSwarm({ name, task, topology, maxRounds, entryIds, agents, links })
+      replaceSwarm(portableToSpec(result.value))
     } else {
-      pasteAgents({ agents: result.value.agents, links: result.value.links })
+      pasteAgents(result.value)
     }
     setIncoming('')
     onClose()

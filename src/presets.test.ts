@@ -8,12 +8,15 @@ import { test } from 'vitest'
 import { PRESETS, DEFAULT_SPEC } from './presets'
 import { DEMO_VOICES, demoVoiceFor } from './engine/providers'
 import { resolveEntryIds } from './engine/runner'
+import { BUILTIN_BLOCKS } from './blocks'
 
 test('every preset is internally consistent', () => {
   for (const preset of PRESETS) {
-    const ids = new Set(preset.agents.map((a) => a.id))
-    assert.equal(ids.size, preset.agents.length, `${preset.name}: duplicate agent ids`)
-    assert.ok(preset.agents.length >= 3, `${preset.name}: too small to show a shape`)
+    const nodes = preset.nodes ?? []
+    const ids = new Set([...preset.agents.map((a) => a.id), ...nodes.map((n) => n.id)])
+    assert.equal(ids.size, preset.agents.length + nodes.length, `${preset.name}: duplicate node ids`)
+    // Two is enough when the shape grows at run time (spawn) or lives inside a block.
+    assert.ok(ids.size >= 2, `${preset.name}: too small to show a shape`)
 
     for (const link of preset.links) {
       assert.ok(ids.has(link.source), `${preset.name}: link ${link.id} comes from nowhere`)
@@ -26,11 +29,28 @@ test('every preset is internally consistent', () => {
       `${preset.name}: duplicate link ids`,
     )
     for (const entry of preset.entryIds) {
-      assert.ok(ids.has(entry), `${preset.name}: entry ${entry} is not an agent`)
+      assert.ok(ids.has(entry), `${preset.name}: entry ${entry} is not on the graph`)
+    }
+    for (const node of nodes) {
+      if (node.kind === 'block') {
+        assert.ok(
+          preset.blocks?.some((b) => b.id === node.blockId),
+          `${preset.name}: block ${node.name} must carry its definition, or a pasted copy would not run`,
+        )
+      }
     }
     assert.deepEqual(resolveEntryIds(preset), preset.entryIds, `${preset.name}: entry points resolve`)
     assert.ok(preset.task.trim().length > 20, `${preset.name}: the task has to say something`)
     assert.ok(preset.maxRounds >= 3, `${preset.name}: too few rounds to reach the end`)
+  }
+})
+
+test('every built-in block runs with no key: each of its characters has a demo voice', () => {
+  for (const block of BUILTIN_BLOCKS) {
+    for (const agent of block.graph.agents) {
+      assert.equal(agent.provider, 'mock', `${block.name}/${agent.name}: blocks must need no key`)
+      assert.ok(DEMO_VOICES[agent.name], `${block.name}/${agent.name} has no demo voice`)
+    }
   }
 })
 

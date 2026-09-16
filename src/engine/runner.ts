@@ -935,7 +935,8 @@ function applySpawn(
   inbox.set(id, [...(inbox.get(id) ?? []), { kind: 'delegation', author: parent.name, text: action.task }])
   ctx.cb.onSpawn?.({ path: level.path, parentId: parent.id, node, link })
   return {
-    chip: { type: 'spawn', text: `spawned ${node.name}` },
+    // The task goes in the chip: when a delegator says nothing but the tag, the chip IS its turn.
+    chip: { type: 'spawn', text: `spawned ${node.name}: ${action.task.length > 90 ? `${action.task.slice(0, 89)}…` : action.task}` },
     transit: { id: link.id, reversed: false, ...(level.path.length ? { path: level.path } : {}) },
   }
 }

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useStore } from '../store'
-import { exportAgents, parsePortable } from '../engine/portable'
+import { exportAgents, parsePortable, portableToSpec } from '../engine/portable'
 
 export interface Shortcut {
   keys: string
@@ -9,7 +9,7 @@ export interface Shortcut {
 
 /** Shown in the help dialog, and the single source of truth for what is actually bound below. */
 export const SHORTCUTS: Shortcut[] = [
-  { keys: 'Delete / Backspace', what: 'Delete the selected agent (never the ticked ones)' },
+  { keys: 'Delete / Backspace', what: 'Delete the selected node or link (never the ticked agents)' },
   { keys: 'Ctrl/⌘ + C', what: 'Copy the selection as JSON' },
   { keys: 'Ctrl/⌘ + X', what: 'Cut it: JSON on the clipboard, agent off the canvas' },
   { keys: 'Ctrl/⌘ + V', what: 'Paste agents or a whole swarm from JSON' },
@@ -97,10 +97,9 @@ export function useHotkeys({ onHelp }: { onHelp: () => void }) {
           const result = parsePortable(text)
           if (!result.ok) return
           if (result.value.kind === 'swarm') {
-            const { name, task, topology, maxRounds, entryIds, agents, links } = result.value
-            store.replaceSwarm({ name, task, topology, maxRounds, entryIds, agents, links })
+            store.replaceSwarm(portableToSpec(result.value))
           } else {
-            store.pasteAgents({ agents: result.value.agents, links: result.value.links })
+            store.pasteAgents(result.value)
           }
         })
         return
@@ -115,6 +114,9 @@ export function useHotkeys({ onHelp }: { onHelp: () => void }) {
         if (store.selectedId) {
           event.preventDefault()
           store.removeAgent(store.selectedId)
+        } else if (store.selectedLinkId) {
+          event.preventDefault()
+          store.removeLink(store.selectedLinkId)
         }
         return
       }

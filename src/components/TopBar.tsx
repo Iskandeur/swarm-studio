@@ -32,6 +32,16 @@ import { PRESETS } from '../presets'
 import { exportSwarm } from '../engine/portable'
 import { SwarmSettings } from './SwarmSettings'
 
+/** What each starter swarm shows, so the menu says why you would open it. */
+const PRESET_HINTS: Record<string, string> = {
+  'The Cat Council': 'fan-out, then fan-in',
+  'The Best Man Speech': 'a manager and its workers',
+  'The Dignity Pipeline': 'a straight pipeline',
+  'The Fridge Tribunal': 'shared memory, a join, a condition, a human gate',
+  'The Delegation Spiral': 'agents spawning agents, down to the depth limit',
+  'The Recursive Excuse': 'a block that contains itself',
+}
+
 export function TopBar({
   onOpenSettings,
   onOpenHelp,
@@ -99,7 +109,11 @@ export function TopBar({
                 setPresetMenu(null)
               }}
             >
-              {preset.name}
+              <ListItemText
+                primary={preset.name}
+                secondary={PRESET_HINTS[preset.name]}
+                secondaryTypographyProps={{ sx: { fontSize: 11.5 } }}
+              />
             </MenuItem>
           ))}
         </Menu>

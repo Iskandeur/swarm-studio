@@ -25,7 +25,9 @@ import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
 import PauseRoundedIcon from '@mui/icons-material/PauseRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import StopRoundedIcon from '@mui/icons-material/StopRounded'
-import { useStore } from '../store'
+import { useGraph, useStore } from '../store'
+import { nodesOf } from '../engine/graph'
+import { AgentGraphSettings, LinkInspector, NodeInspector } from './NodeInspector'
 import { modelForProvider, PROVIDERS, providerInfo, resolveEndpoint } from '../engine/providers'
 import { DEFAULT_MAX_TOKENS, resolveEntryIds } from '../engine/runner'
 import { agentColor } from '../theme'
@@ -45,8 +47,10 @@ const HUE_NAMES: Record<number, string> = {
 
 /** Left panel: the agent roster, and everything about the one you selected. */
 export function Inspector() {
-  const spec = useStore((s) => s.spec)
+  // The graph on the canvas: the swarm, or the inside of the block being edited.
+  const spec = useGraph()
   const selectedId = useStore((s) => s.selectedId)
+  const selectedLinkId = useStore((s) => s.selectedLinkId)
   const select = useStore((s) => s.select)
   const addAgent = useStore((s) => s.addAgent)
   const updateAgent = useStore((s) => s.updateAgent)
@@ -70,11 +74,14 @@ export function Inspector() {
   const themeMode = useStore((s) => s.themeMode)
 
   const agent = spec.agents.find((a) => a.id === selectedId)
+  const flowNodes = nodesOf(spec)
+  const flowNode = flowNodes.find((n) => n.id === selectedId)
+  const link = selectedLinkId ? spec.links.find((l) => l.id === selectedLinkId) : undefined
   const entryIds = resolveEntryIds(spec)
   const info = agent ? providerInfo(agent.provider) : undefined
   const missingKey = agent && agent.provider !== 'mock' && !keys[agent.provider]
   const missingEndpoint = agent ? !resolveEndpoint(agent.provider, endpoints) && agent.provider !== 'mock' : false
-  const nameOf = (id: string) => spec.agents.find((a) => a.id === id)?.name ?? id
+  const nameOf = (id: string) => spec.agents.find((a) => a.id === id)?.name ?? flowNodes.find((n) => n.id === id)?.name ?? id
   /** Both directions, because "who can speak to me" is half of what a topology means. */
   const links = agent
     ? spec.links
@@ -98,7 +105,7 @@ export function Inspector() {
 
   return (
     <Stack sx={{ height: '100%', overflow: 'hidden' }}>
-      <Box sx={{ px: 2, pt: 2, pb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{ px: 2, pt: 2, pb: 1, display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
         <Typography variant="subtitle2" sx={{ flex: 1, opacity: 0.7 }}>
           AGENTS · {spec.agents.length}
         </Typography>
@@ -131,7 +138,9 @@ export function Inspector() {
         </Button>
       </Box>
 
-      <Stack spacing={0.5} sx={{ px: 1.5, pb: 1.5, maxHeight: 190, overflowY: 'auto' }}>
+      {/* flexShrink 0 on everything above the detail: in a column flex the roster was squeezed under
+          its own content once the node list joined it, and the rows drew over each other. */}
+      <Stack spacing={0.5} sx={{ px: 1.5, pb: 1.5, maxHeight: 190, overflowY: 'auto', flexShrink: 0 }}>
         {spec.agents.map((a) => (
           <Paper
             key={a.id}
@@ -207,7 +216,7 @@ export function Inspector() {
       {/* Bulk edit. Without it, giving eight agents the same model means eight identical trips
           through the same three fields. */}
       {multiIds.length > 0 && (
-        <Box sx={{ px: 2, pb: 2 }}>
+        <Box sx={{ px: 2, pb: 2, flexShrink: 0 }}>
           <Paper
             elevation={0}
             sx={{ p: 1.5, border: '1px solid', borderColor: 'primary.main', bgcolor: 'action.hover' }}
@@ -277,22 +286,54 @@ export function Inspector() {
         </Box>
       )}
 
+      {flowNodes.length > 0 && (
+        <>
+          <Typography variant="subtitle2" sx={{ px: 2, pb: 0.5, opacity: 0.7, flexShrink: 0 }}>
+            NODES · {flowNodes.length}
+          </Typography>
+          <Stack direction="row" spacing={0.5} useFlexGap sx={{ px: 1.5, pb: 1.5, flexWrap: 'wrap', maxHeight: 96, overflowY: 'auto', flexShrink: 0 }}>
+            {flowNodes.map((n) => (
+              <Chip
+                key={n.id}
+                size="small"
+                label={`${n.name} · ${n.kind}`}
+                variant={n.id === selectedId ? 'filled' : 'outlined'}
+                onClick={() => select(n.id)}
+                sx={{ height: 22, fontSize: 11 }}
+              />
+            ))}
+          </Stack>
+        </>
+      )}
+
       <Divider />
 
-      {!agent && (
+      {link && (
+        <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <LinkInspector linkId={link.id} />
+        </Box>
+      )}
+
+      {!link && flowNode && (
+        <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <NodeInspector nodeId={flowNode.id} />
+        </Box>
+      )}
+
+      {!link && !agent && !flowNode && (
         <Box sx={{ p: 3, opacity: 0.6 }}>
           <Typography variant="body2">
             Pick an agent above to set its <b>model</b>, provider and system prompt.
           </Typography>
           <Typography variant="body2" sx={{ mt: 1.5 }}>
-            To link agents, drag from a node's right dot onto another node's left dot. To cut a link,
-            click it and press the ✕ that appears on the curve.
+            To link agents, drag from a node's right dot onto another node's left dot. Click a link to
+            give it a label, a condition or a loop budget; the ✕ on the curve cuts it.
           </Typography>
         </Box>
       )}
 
-      {agent && (
-        <Stack spacing={2.25} sx={{ p: 2, overflowY: 'auto' }}>
+      {!link && agent && (
+        <Stack spacing={2.25} sx={{ p: 2, overflowY: 'auto', flex: 1, minHeight: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <TextField
               label="Name"
@@ -464,6 +505,9 @@ export function Inspector() {
               With none marked, every agent that has no incoming link starts the run.
             </Typography>
           </Box>
+
+          <Divider />
+          <AgentGraphSettings agentId={agent.id} />
         </Stack>
       )}
     </Stack>

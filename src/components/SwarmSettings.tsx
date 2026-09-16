@@ -12,8 +12,10 @@ import {
   Typography,
 } from '@mui/material'
 import HelpOutlineRoundedIcon from '@mui/icons-material/HelpOutlineRounded'
+import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded'
 import { useStore } from '../store'
 import type { Topology } from '../types'
+import { DEFAULT_MAX_DEPTH, DEFAULT_MAX_SPAWNS } from '../types'
 
 export interface TopologyInfo {
   id: Topology
@@ -59,6 +61,7 @@ export function SwarmSettings({ direction = 'row' }: { direction?: 'row' | 'colu
   const setSpec = useStore((s) => s.setSpec)
   const setTopology = useStore((s) => s.setTopology)
   const [help, setHelp] = useState<HTMLElement | null>(null)
+  const [limits, setLimits] = useState<HTMLElement | null>(null)
   const column = direction === 'column'
   const current = TOPOLOGIES.find((t) => t.id === spec.topology)
 
@@ -159,9 +162,63 @@ export function SwarmSettings({ direction = 'row' }: { direction?: 'row' | 'colu
           spec.maxRounds > 40
             ? `${spec.maxRounds} rounds will cost real money on a paid provider`
             : column
-              ? 'Hard stop on the number of turns.'
+              ? 'Hard stop on the number of turns, rounds inside blocks included.'
               : undefined
         }
+      />
+
+      {/* Only the two limits that make recursion safe. They cost nothing until a block contains
+          itself or an agent may spawn, and then they are what stops the run from growing for ever.
+          In the app bar they sit behind one button: two more fields there pushed the bar past the
+          width of a laptop screen. */}
+      {column ? (
+        <Limits column />
+      ) : (
+        <>
+          <Tooltip title="Recursion limits: depth and spawns">
+            <IconButton size="small" onClick={(e) => setLimits(e.currentTarget)} aria-label="Recursion limits">
+              <AccountTreeRoundedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Popover
+            open={Boolean(limits)}
+            anchorEl={limits}
+            onClose={() => setLimits(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            slotProps={{ paper: { sx: { width: 300, p: 2 } } }}
+          >
+            <Limits column />
+          </Popover>
+        </>
+      )}
+    </Stack>
+  )
+}
+
+/** Max depth and max spawns, with what they bound. */
+function Limits({ column }: { column: boolean }) {
+  const spec = useStore((s) => s.spec)
+  const setSpec = useStore((s) => s.setSpec)
+  return (
+    <Stack spacing={2} sx={{ width: '100%' }}>
+      <TextField
+        label="Max depth"
+        type="number"
+        value={spec.maxDepth ?? DEFAULT_MAX_DEPTH}
+        onChange={(e) => setSpec({ maxDepth: Math.min(8, Math.max(0, Math.floor(Number(e.target.value) || 0))) })}
+        fullWidth={column}
+        inputProps={{ min: 0, max: 8, step: 1, inputMode: 'numeric' }}
+        helperText="How deep blocks may nest, and helpers may spawn helpers."
+      />
+      <TextField
+        label="Max spawns"
+        type="number"
+        value={spec.maxSpawns ?? DEFAULT_MAX_SPAWNS}
+        onChange={(e) => setSpec({ maxSpawns: Math.min(100, Math.max(0, Math.floor(Number(e.target.value) || 0))) })}
+        fullWidth={column}
+        inputProps={{ min: 0, max: 100, step: 1, inputMode: 'numeric' }}
+        helperText="Helpers agents may create in one run, all depths together."
       />
     </Stack>
   )

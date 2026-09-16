@@ -22,12 +22,27 @@ import CheckRoundedIcon from '@mui/icons-material/CheckRounded'
 import UnfoldMoreRoundedIcon from '@mui/icons-material/UnfoldMoreRounded'
 import IosShareRoundedIcon from '@mui/icons-material/IosShareRounded'
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded'
+import AltRouteRoundedIcon from '@mui/icons-material/AltRouteRounded'
+import EditNoteRoundedIcon from '@mui/icons-material/EditNoteRounded'
+import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded'
+import BlockRoundedIcon from '@mui/icons-material/BlockRounded'
+import LayersRoundedIcon from '@mui/icons-material/LayersRounded'
 import { useStore } from '../store'
+import { nodesOf } from '../engine/graph'
+import { stripActionTags } from '../engine/actions'
+import { MemoryPanel } from './MemoryPanel'
 import { agentColor, agentGlow } from '../theme'
 import { RichText } from './RichText'
 import { Composer } from './Composer'
 import { exportFilename, toJson, toMarkdown } from '../engine/transcriptExport'
-import type { TranscriptEntry } from '../types'
+import type { ActionChip, Agent, TranscriptEntry } from '../types'
+
+const ACTION_ICONS = {
+  route: AltRouteRoundedIcon,
+  write: EditNoteRoundedIcon,
+  spawn: AccountTreeRoundedIcon,
+  refused: BlockRoundedIcon,
+} as const
 
 /** Longer than this and a message is folded: the panel is for reading, not for scrolling past. */
 const FOLD_CHARS = 700
@@ -52,7 +67,10 @@ export function TranscriptPanel() {
   const phase = useStore((s) => s.phase)
   const error = useStore((s) => s.error)
   const select = useStore((s) => s.select)
+  const runGraph = useStore((s) => s.runGraph)
   const [rendering, setRendering] = useState<'rich' | 'raw'>('rich')
+  const [view, setView] = useState<'transcript' | 'memory'>('transcript')
+  const hasMemory = nodesOf(spec).some((n) => n.kind === 'memory') || (spec.blocks ?? []).some((b) => nodesOf(b.graph).some((n) => n.kind === 'memory'))
   const [agentFilter, setAgentFilter] = useState<string | null>(null)
   const [exportMenu, setExportMenu] = useState<HTMLElement | null>(null)
   const bottom = useRef<HTMLDivElement>(null)
@@ -70,8 +88,20 @@ export function TranscriptPanel() {
     if (stickToBottom.current) bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [visible.length, lastText])
 
-  const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? id
-  const hueOf = (id: string) => agents.find((a) => a.id === id)?.hue ?? 262
+  /**
+   * Who an id is. The swarm's own agents first; then what a run grew (spawned helpers) and what
+   * lives inside blocks, whose ids the swarm itself does not know.
+   */
+  const everyAgent: Agent[] = useMemo(
+    () => [...agents, ...runGraph.agents, ...(spec.blocks ?? []).flatMap((b) => b.graph.agents)],
+    [agents, runGraph.agents, spec.blocks],
+  )
+  const everyNode = useMemo(
+    () => [...nodesOf(spec), ...runGraph.nodes, ...(spec.blocks ?? []).flatMap((b) => nodesOf(b.graph))],
+    [spec, runGraph.nodes],
+  )
+  const nameOf = (id: string) => everyAgent.find((a) => a.id === id)?.name ?? everyNode.find((n) => n.id === id)?.name ?? id
+  const hueOf = (id: string) => everyAgent.find((a) => a.id === id)?.hue ?? 262
   const spoke = [...new Set(transcript.map((e) => e.agentId))]
 
   /** Built at click time, not on every render: the timestamp has to be the moment you exported. */
@@ -82,9 +112,20 @@ export function TranscriptPanel() {
   return (
     <Stack sx={{ height: '100%', overflow: 'hidden' }}>
       <Box sx={{ px: 2, pt: 2, pb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Typography variant="subtitle2" sx={{ opacity: 0.7, flex: 1 }}>
-          TRANSCRIPT · {transcript.length}
-        </Typography>
+        {hasMemory ? (
+          <ToggleButtonGroup size="small" exclusive value={view} onChange={(_, value) => value && setView(value)} sx={{ flex: 1 }}>
+            <ToggleButton value="transcript" sx={{ px: 1, py: 0.25, fontSize: 11 }}>
+              Transcript · {transcript.length}
+            </ToggleButton>
+            <ToggleButton value="memory" sx={{ px: 1, py: 0.25, fontSize: 11 }}>
+              Memory
+            </ToggleButton>
+          </ToggleButtonGroup>
+        ) : (
+          <Typography variant="subtitle2" sx={{ opacity: 0.7, flex: 1 }}>
+            TRANSCRIPT · {transcript.length}
+          </Typography>
+        )}
         <ToggleButtonGroup
           size="small"
           exclusive
@@ -192,7 +233,14 @@ export function TranscriptPanel() {
       {phase === 'running' && <LinearProgress sx={{ height: 2 }} />}
       <Divider />
 
+      {hasMemory && view === 'memory' && (
+        <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <MemoryPanel />
+        </Box>
+      )}
+
       <Box
+        hidden={hasMemory && view === 'memory'}
         ref={scroller}
         onScroll={(event) => {
           const el = event.currentTarget
@@ -209,8 +257,10 @@ export function TranscriptPanel() {
 
         <Stack spacing={1.25}>
           {visible.map((entry, index) => {
-            const previous = visible[index - 1]
-            const newRound = !previous || previous.round !== entry.round
+            // Only the swarm's own rounds draw a divider. A block runs rounds of its own, numbered
+            // from 1 inside its turn; letting them draw dividers printed "ROUND 2, ROUND 1, ROUND 2".
+            const previousTop = visible.slice(0, index).reverse().find((e) => !e.path?.length)
+            const newRound = !entry.path?.length && (!previousTop || previousTop.round !== entry.round)
             return (
               <Box key={entry.id}>
                 {newRound && (
@@ -222,11 +272,13 @@ export function TranscriptPanel() {
                 )}
                 <Message
                   entry={entry}
-                  name={nameOf(entry.agentId)}
+                  name={entry.speaker ?? nameOf(entry.agentId)}
                   // A canned demo answer must say so, or a first-time reader takes "the agents
                   // ignored my task" for the product being broken.
-                  demo={agents.find((a) => a.id === entry.agentId)?.provider === 'mock'}
-                  hue={hueOf(entry.agentId)}
+                  demo={everyAgent.find((a) => a.id === entry.agentId)?.provider === 'mock'}
+                  hue={entry.hue ?? hueOf(entry.agentId)}
+                  where={entry.path?.map(nameOf)}
+                  block={everyNode.some((n) => n.id === entry.agentId && n.kind === 'block')}
                   to={entry.to.map(nameOf)}
                   mode={themeMode}
                   rendering={rendering}
@@ -259,6 +311,8 @@ function Message({
   mode,
   rendering,
   onSelectAgent,
+  where,
+  block,
 }: {
   entry: TranscriptEntry
   name: string
@@ -268,6 +322,10 @@ function Message({
   mode: 'light' | 'dark'
   rendering: 'rich' | 'raw'
   onSelectAgent: () => void
+  /** Names of the blocks this was said inside, outermost first. */
+  where?: string[]
+  /** The speaker is a block node: this is what its inner run returned. */
+  block?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -276,7 +334,9 @@ function Message({
   const folded = long && !expanded && !streaming
   // A stopped answer keeps its partial text, so it renders like a normal one, not like a failure.
   const stoppedEmpty = entry.status === 'stopped' && entry.text.trim() === ''
-  const shown = folded ? entry.text.slice(0, FOLD_CHARS) : entry.text
+  // While it streams, a tag is half-written; the finished entry already holds the prose alone.
+  const text = streaming ? stripActionTags(entry.text) : entry.text
+  const shown = folded ? text.slice(0, FOLD_CHARS) : text
   const seconds = entry.endedAt ? (entry.endedAt - entry.startedAt) / 1000 : undefined
   const color = agentColor(hue, mode)
 
@@ -304,8 +364,16 @@ function Message({
         borderLeft: human ? undefined : '3px solid',
         borderLeftColor: human ? undefined : color,
         bgcolor: human ? 'transparent' : agentGlow(hue, mode === 'dark' ? 0.07 : 0.05),
+        // Nested runs step in, so a recursion reads as a staircase.
+        ml: where?.length ? Math.min(where.length, 4) * 1.5 : 0,
       }}
     >
+      {where && where.length > 0 && (
+        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, opacity: 0.55, mb: 0.5, fontSize: 10.5 }}>
+          <LayersRoundedIcon sx={{ fontSize: 12 }} />
+          inside {where.join(' › ')}
+        </Typography>
+      )}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75, flexWrap: 'wrap' }}>
         {human ? (
           <Typography variant="caption" sx={{ fontWeight: 700, opacity: 0.8 }}>
@@ -328,7 +396,8 @@ function Message({
             </Typography>
           </>
         )}
-        {!human && to.length === 0 && entry.status === 'complete' && (
+        {block && <Chip size="small" label="block result" variant="outlined" sx={{ height: 17, fontSize: 10 }} />}
+        {!human && !where?.length && to.length === 0 && entry.status === 'complete' && entry.text.trim() !== '' && (
           <Chip size="small" label="swarm output" sx={{ height: 17, fontSize: 10 }} />
         )}
         {demo && !human && (
@@ -375,6 +444,8 @@ function Message({
         <RichText source={shown} />
       )}
 
+      {entry.actions && entry.actions.length > 0 && <Actions actions={entry.actions} color={color} />}
+
       {folded && (
         <Box
           onClick={() => setExpanded(true)}
@@ -410,5 +481,34 @@ function Message({
         />
       )}
     </Paper>
+  )
+}
+
+/** What a message DID besides being read: a route taken, a memory written, a helper spawned, a refusal. */
+function Actions({ actions, color }: { actions: ActionChip[]; color: string }) {
+  return (
+    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.75 }}>
+      {actions.map((action, index) => {
+        const Icon = ACTION_ICONS[action.type]
+        return (
+          <Chip
+            key={index}
+            size="small"
+            icon={<Icon sx={{ fontSize: '13px !important', color: action.type === 'refused' ? 'error.main' : `${color} !important` }} />}
+            label={action.text}
+            variant="outlined"
+            sx={{
+              height: 'auto',
+              minHeight: 20,
+              maxWidth: '100%',
+              fontSize: 10.5,
+              fontFamily: '"Roboto Mono", monospace',
+              borderColor: action.type === 'refused' ? 'error.main' : 'divider',
+              '& .MuiChip-label': { whiteSpace: 'normal', py: 0.25 },
+            }}
+          />
+        )
+      })}
+    </Box>
   )
 }

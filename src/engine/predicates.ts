@@ -410,7 +410,7 @@ function canStartJson(text: string, start: number): boolean {
   while (i < text.length && /\s/.test(text[i])) i++
   const next = text[i]
   if (next === undefined) return false
-  return text[start] === '{' ? next === '"' || next === '}' : '"{[]-0123456789tfn'.includes(next)
+  return text[start] === '{' ? next === '"' || next === '}' : /^["{[\]\-\dtfn]$/.test(next)
 }
 
 /** Index just past the bracket that closes the one at `start`, or -1. Strings and escapes are respected. */

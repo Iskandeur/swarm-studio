@@ -474,6 +474,82 @@ export const DEMO_VOICES: Record<string, string[]> = {
     'Cut to: "I used to open the door. Now I am simply present when it opens." Better. Shorter. Sadder.',
     'Two words gone. You will not miss them.',
   ],
+
+  // The Fridge Tribunal: a blackboard, a join, a condition, a human gate. The tags below are what a
+  // model would write; the demo writes them so every mechanism moves with no key.
+  'The Detective': [
+    'Spoon in the sink, still warm. Lid licked clean. The label says it all, in 36-point Comic Sans. <write memory="Evidence" key="suspect">Gary from Accounts</write><write memory="Evidence" key="motive">skipped lunch to finish a spreadsheet nobody asked for</write>',
+    'Fresh angle: the bite radius on the spoon is Gary-sized. <write memory="Evidence" key="spoon">bite radius consistent with Gary</write>',
+  ],
+  'Witness: Denise': [
+    'I labelled it PROPERTY OF DENISE, DO NOT. There was no ambiguity. There was only Gary.',
+    'I would like it on record that it was the peach one.',
+  ],
+  'Witness: Gary': [
+    'I was in a meeting that could have been an email. The email could have been silence. I have no memory of yoghurt.',
+    'Define "ate".',
+  ],
+  'The Prosecutor': [
+    'The evidence board names Gary, the motive is a spreadsheet, and the spoon is warm. The prosecution rests, mainly out of tiredness.',
+    'The prosecution rests again, more tired.',
+  ],
+  'The Judge': [
+    'Gary is guilty of yoghurt in the first degree. Sentence: he buys the next pack and labels it himself, in Comic Sans, as a gesture.',
+    'The court is adjourned until someone touches the hummus.',
+  ],
+
+  // The Delegation Spiral: spawn, all the way down to the depth limit. Each delegator's first turn is
+  // only the tag, so nothing but the final answer climbs back up.
+  'The CEO': [
+    '<spawn name="VP of Summaries">I need a one-page summary of why the coffee machine is broken. I will not be reading it.</spawn>',
+    'Perfect. Nobody tell me what it says. Put it in the board deck.',
+  ],
+  'VP of Summaries': [
+    '<spawn name="Director of Brevity">Great ask from the top: one-page summary on the coffee machine. Cascade as needed.</spawn>',
+    'Summary attached. I added a slide about synergy and removed the word "unplugged", which tested badly.',
+  ],
+  'Director of Brevity': [
+    '<spawn name="Senior Manager">Coffee machine summary, one page, CEO-grade. Delegate for bandwidth.</spawn>',
+    'Reviewed. Shortened it to "coffee: resolved". Escalating upward with a sense of momentum.',
+  ],
+  'Senior Manager': [
+    '<spawn name="The Intern">Please write a one-page summary of why the coffee machine is broken.</spawn>',
+    'The intern is above my delegation limit, so I walked to the kitchen myself. The coffee machine is unplugged. It has always been unplugged.',
+  ],
+
+  // The Recursive Excuse, and the built-in blocks it and the library use.
+  'Recursive Solver': [
+    'Too big to explain in one go. The smaller question: why is the FIRST half of the report late? <route to="split"/>',
+    'Small enough to answer: the printer asked for a firmware update, and nobody felt emotionally ready. <route to="direct"/>',
+  ],
+  'Merger': [
+    'Scaling that back up one level: the same reason, twice as long, with a meeting about it in between.',
+  ],
+  'Loop Writer': [
+    'Draft 1: The meeting is cancelled. Nobody knows why. Everyone is relieved.',
+    'Draft 2: The meeting is cancelled. Relief spreads quietly, like a rumour about free cake.',
+  ],
+  'Loop Critic': [
+    '```json\n{"score": 5, "note": "funny, but the second sentence is doing nothing"}\n```',
+    '```json\n{"score": 8, "note": "ship it"}\n```\nThe meeting is cancelled. Relief spreads quietly, like a rumour about free cake.',
+  ],
+  'Debate Pro': [
+    'In favour, obviously: it is bold, it is cheap, and nobody has tried it, which I choose to read as a gap in the market.',
+  ],
+  'Debate Con': [
+    'Against: nobody has tried it because the three people who did are now consultants who will not discuss it.',
+  ],
+  'Debate Judge': [
+    'Both sides made one good point and one confident one. Ruling: do a small version on Tuesday and pretend it was always the plan.',
+  ],
+  'Splitter': [
+    'Three parts, three helpers. <spawn name="Part One Worker">Handle the first third.</spawn><spawn name="Part Two Worker">Handle the second third.</spawn><spawn name="Part Three Worker">Handle the last third.</spawn>',
+    'MERGE: part one is done and shorter than it looked, part two found a typo in part one, part three is fine and would like that noted.',
+  ],
+  'Part One Worker': ['First third: done, and shorter than it looked.'],
+  'Part Two Worker': ['Second third: done. Also, there is a typo in the first third.'],
+  'Part Three Worker': ['Last third: fine. Please note that it is fine.'],
+  'Reducer': ['Merged: three thirds make a whole, which surprised nobody except the second worker.'],
 }
 
 /** The agent's name as `buildSystem` writes it — the only stable handle the mock has. */
