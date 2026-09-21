@@ -135,8 +135,12 @@ export function buildDecisionBody(node: Pick<DecisionNode, 'model' | 'questions'
         (q.options ?? []).filter((o) => o.label.trim()).map((o) => [o.label.trim(), o.criterion.trim() || null]),
       )
     } else if (q.type === 'noul') {
-      const described = (q.options ?? []).filter((o) => (o.label === 'true' || o.label === 'false') && o.criterion.trim())
-      if (described.length > 0) question.criteria = Object.fromEntries(described.map((o) => [o.label, o.criterion.trim()]))
+      // Both sides or neither: OpenRouter's validator refuses `criteria` with only `true` described
+      // (a live call answered 400 on `criteria.false`), though TypeSafe's SDK types both as optional.
+      const side = (label: 'true' | 'false') => (q.options ?? []).find((o) => o.label === label)?.criterion.trim() ?? ''
+      const yes = side('true')
+      const no = side('false')
+      if (yes || no) question.criteria = { true: yes || 'yes', false: no || 'no' }
     } else {
       question.criteria = (q.levels ?? []).map((l) => l.trim()).filter(Boolean)
     }
@@ -258,6 +262,22 @@ export interface DecisionResult {
   cost?: number
 }
 
+/**
+ * A sentence out of an error body. Two shapes seen: `{error: {message}}`, and a bare list of
+ * validation issues `[{path: [...], message}]`, which is what a malformed question gets back.
+ */
+export function errorDetail(json: unknown): string | undefined {
+  const message = (json as { error?: { message?: unknown } } | undefined)?.error?.message
+  if (typeof message === 'string') return message
+  if (Array.isArray(json)) {
+    const issues = json
+      .filter((i): i is { path?: unknown; message?: unknown } => Boolean(i) && typeof i === 'object')
+      .map((i) => `${Array.isArray(i.path) ? i.path.join('.') : '?'}: ${typeof i.message === 'string' ? i.message : 'invalid'}`)
+    if (issues.length > 0) return issues.slice(0, 3).join('; ')
+  }
+  return undefined
+}
+
 export async function callDecision(call: DecisionCall): Promise<DecisionResult> {
   const problems = questionProblems(call.node.questions)
   if (problems.length > 0) throw new Error(problems[0])
@@ -288,10 +308,7 @@ export async function callDecision(call: DecisionCall): Promise<DecisionResult> 
   } catch {
     json = undefined
   }
-  if (!res.ok) {
-    const detail = (json as { error?: { message?: unknown } } | undefined)?.error?.message
-    throw new Error(`HTTP ${res.status} — ${typeof detail === 'string' ? detail : text.slice(0, 300) || res.statusText}`)
-  }
+  if (!res.ok) throw new Error(`HTTP ${res.status} — ${errorDetail(json) ?? (text.slice(0, 300) || res.statusText)}`)
   if (json === undefined) throw new Error(`the decision endpoint did not answer JSON: ${text.slice(0, 200)}`)
   const answers = parseDecisionResponse(json, call.node.questions)
   const usage = (json as { usage?: Record<string, unknown> }).usage ?? {}

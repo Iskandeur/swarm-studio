@@ -11,6 +11,7 @@ import {
   callDecision,
   decisionKey,
   demoDecision,
+  errorDetail,
   parseDecisionResponse,
   questionProblems,
   resolveDecisionEndpoint,
@@ -96,6 +97,21 @@ describe('buildDecisionBody', () => {
       's',
     )
     expect('criteria' in emptyDescriptions.questions.q).toBe(false)
+
+    // One side described: both are sent. OpenRouter's validator answered 400 on `criteria.false`
+    // when only `true` was there (live call, 21/09), although TypeSafe's SDK types both as optional.
+    const oneSide = buildDecisionBody(
+      { model: 'm', questions: [{ name: 'q', type: 'noul', instructions: 'x', options: [{ label: 'true', criterion: 'blocked' }] }] },
+      's',
+    )
+    expect(oneSide.questions.q.criteria).toEqual({ true: 'blocked', false: 'no' })
+  })
+
+  it('turns a list of validation issues into one readable line', () => {
+    const issues = [{ code: 'invalid_union', path: ['questions', 'blocked', 'criteria', 'false'], message: 'Invalid input' }]
+    expect(errorDetail(issues)).toBe('questions.blocked.criteria.false: Invalid input')
+    expect(errorDetail({ error: { message: 'No auth credentials found' } })).toBe('No auth credentials found')
+    expect(errorDetail('nope')).toBeUndefined()
   })
 
   it('sends score criteria as the array of levels', () => {
