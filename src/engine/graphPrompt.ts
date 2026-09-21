@@ -33,7 +33,7 @@ import { PRESETS } from '../presets.ts'
 import { exportSwarm, parsePortable, portableToSpec } from './portable.ts'
 import { callProvider, PROVIDERS, resolveEndpoint, type ChatRequest, type ChatResult, type Endpoints } from './providers.ts'
 import { DECISION_PROVIDER_IDS, DECISION_TYPES, decisionProviderInfo } from './decisions.ts'
-import { extractJson, readPredicate } from './predicates.ts'
+import { readPredicate } from './predicates.ts'
 import { resolveEntryIds } from './graph.ts'
 
 export type GraphPromptMode = 'replace' | 'edit'
@@ -203,35 +203,80 @@ export function buildRepairMessage(error: string, previous: string): string {
 /* Reading the answer                                                                                */
 /* ------------------------------------------------------------------------------------------------ */
 
+const CUT_OFF = 'The JSON is cut off before its end: the answer was probably too long. Return a smaller graph with shorter prompts.'
+const NOT_AN_OBJECT = 'The answer is a JSON array; a swarm is one JSON object.'
+
 /**
  * The first JSON object in a model's answer, whatever it wrapped it in: a ```json fence, a sentence
- * before and after, nothing at all. An answer that opens an object and never closes it is named as
- * cut off, because the fix (a smaller graph, a bigger token budget) is not the fix for bad JSON.
+ * before and after, nothing at all.
+ *
+ * Only TOP-LEVEL containers are candidates. The guards' `extractJson` is the wrong tool here: on an
+ * answer cut off at the token limit it skips the unclosed outer object and returns the first complete
+ * agent inside it — a plausible object that is not the graph. So a container that never closes is
+ * named as cut off (its fix, a smaller graph, is not the fix for bad JSON), and the scan never looks
+ * inside a container it has already judged.
  */
 export function extractGraphJson(raw: string): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
-  const value = extractJson(raw)
-  if (value !== undefined && !Array.isArray(value)) return { ok: true, value: value as Record<string, unknown> }
-  if (Array.isArray(value)) return { ok: false, error: 'The answer is a JSON array; a swarm is one JSON object.' }
-  const opened = raw.indexOf('{')
-  if (opened < 0) return { ok: false, error: 'The answer contains no JSON object.' }
-  const depth = unclosedBraces(raw.slice(opened))
-  if (depth > 0) return { ok: false, error: 'The JSON is cut off before its end: the answer was probably too long. Return a smaller graph with shorter prompts.' }
-  return { ok: false, error: 'The answer contains a JSON object that does not parse (a missing comma, quote or brace).' }
+  for (const fence of raw.matchAll(/```[ \t]*(?:json)?[ \t]*\r?\n([\s\S]*?)```/gi)) {
+    const parsed = tryParse(fence[1])
+    if (isObject(parsed)) return { ok: true, value: parsed }
+    if (Array.isArray(parsed)) return { ok: false, error: NOT_AN_OBJECT }
+  }
+  let sawInvalid = false
+  for (let i = 0; i < raw.length; i++) {
+    if (!startsContainer(raw, i)) continue
+    const end = closeOf(raw, i)
+    if (end < 0) return { ok: false, error: CUT_OFF }
+    const parsed = tryParse(raw.slice(i, end))
+    if (isObject(parsed)) return { ok: true, value: parsed }
+    if (Array.isArray(parsed)) return { ok: false, error: NOT_AN_OBJECT }
+    sawInvalid = true
+    i = end - 1
+  }
+  return {
+    ok: false,
+    error: sawInvalid
+      ? 'The answer contains a JSON object that does not parse (a missing comma, quote or brace).'
+      : 'The answer contains no JSON object.',
+  }
 }
 
-function unclosedBraces(text: string): number {
+function tryParse(text: string): unknown {
+  try {
+    return JSON.parse(text.trim())
+  } catch {
+    return undefined
+  }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** `{"…` or `{}`, or `[{` / `[]`: what a JSON document opens with, and prose braces (`{name}`) do not. */
+function startsContainer(text: string, at: number): boolean {
+  const ch = text[at]
+  if (ch !== '{' && ch !== '[') return false
+  let i = at + 1
+  while (i < text.length && /\s/.test(text[i])) i++
+  const next = text[i]
+  return ch === '{' ? next === '"' || next === '}' : next === '{' || next === ']'
+}
+
+/** Index just past the bracket closing the one at `start`, or -1 if the text ends first. */
+function closeOf(text: string, start: number): number {
   let depth = 0
   let inString = false
-  for (let i = 0; i < text.length; i++) {
+  for (let i = start; i < text.length; i++) {
     const ch = text[i]
     if (inString) {
       if (ch === '\\') i++
       else if (ch === '"') inString = false
     } else if (ch === '"') inString = true
     else if (ch === '{' || ch === '[') depth++
-    else if (ch === '}' || ch === ']') depth--
+    else if ((ch === '}' || ch === ']') && --depth === 0) return i + 1
   }
-  return depth
+  return -1
 }
 
 function list(raw: unknown): Record<string, unknown>[] {
@@ -366,10 +411,19 @@ export function restoreIdentity(next: SwarmSpec, current: SwarmSpec, raw: Record
  * Lays out whatever the answer left without a position: columns by distance from the entry points,
  * rows in order of appearance. Nodes that do have a position are left alone.
  */
-export function layoutMissing(spec: SwarmSpec, raw: Record<string, unknown>): SwarmSpec {
-  const positioned = new Set(
+/** Ids the answer itself placed. */
+function positionedIds(raw: Record<string, unknown>): Set<string> {
+  return new Set(
     [...list(raw.agents), ...list(raw.nodes)].filter((e) => e.position && typeof e.position === 'object').map((e) => String(e.id)),
   )
+}
+
+/**
+ * `placed` is either the raw answer (its positioned ids count) or the set of ids already placed —
+ * in edit mode that includes every node restored to where it was, which must not be laid out again.
+ */
+export function layoutMissing(spec: SwarmSpec, placed: Record<string, unknown> | Set<string>): SwarmSpec {
+  const positioned = placed instanceof Set ? placed : positionedIds(placed)
   const all = [...spec.agents.map((a) => a.id), ...(spec.nodes ?? []).map((n) => n.id)]
   const missing = all.filter((id) => !positioned.has(id))
   if (missing.length === 0) return spec
@@ -438,8 +492,13 @@ export function validateGenerated(
   if (drops.length > 0) return { ok: false, error: drops.join('\n') }
   const stuck = runnable(spec)
   if (stuck) return { ok: false, error: stuck }
-  if (options.mode === 'edit' && options.current) spec = restoreIdentity(spec, options.current, extracted.value)
-  spec = layoutMissing(spec, extracted.value)
+  const placed = positionedIds(extracted.value)
+  if (options.mode === 'edit' && options.current) {
+    spec = restoreIdentity(spec, options.current, extracted.value)
+    // Every node that existed before has its position now: the model's, or the one it had.
+    for (const e of [...options.current.agents, ...(options.current.nodes ?? [])]) placed.add(e.id)
+  }
+  spec = layoutMissing(spec, placed)
   return { ok: true, spec }
 }
 
