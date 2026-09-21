@@ -35,6 +35,7 @@ import { TranscriptPanel } from './components/TranscriptPanel'
 import { RunBar } from './components/RunBar'
 import { SettingsDialog } from './components/SettingsDialog'
 import { ShareDialog } from './components/ShareDialog'
+import { GraphPromptDialog } from './components/GraphPromptDialog'
 import { SHORTCUTS, useHotkeys } from './components/useHotkeys'
 import { NodePalette } from './components/NodePalette'
 import { BlockLibrary } from './components/BlockLibrary'
@@ -48,6 +49,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+  const [promptOpen, setPromptOpen] = useState(false)
   const notice = useStore((s) => s.notice)
   const dismissNotice = useStore((s) => s.dismissNotice)
 
@@ -60,7 +62,9 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
         onOpenShare={() => setShareOpen(true)}
+        onOpenPrompt={() => setPromptOpen(true)}
       />
+      <GraphPromptDialog open={promptOpen} onClose={() => setPromptOpen(false)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <ShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} />
@@ -127,10 +131,12 @@ function Shell({
   onOpenSettings,
   onOpenHelp,
   onOpenShare,
+  onOpenPrompt,
 }: {
   onOpenSettings: () => void
   onOpenHelp: () => void
   onOpenShare: () => void
+  onOpenPrompt: () => void
 }) {
   // `md` is the switch: below it there is no room for three columns side by side.
   const mobile = useMediaQuery('(max-width:899.95px)')
@@ -149,7 +155,7 @@ function Shell({
         overflow: 'hidden',
       }}
     >
-      <TopBar onOpenSettings={onOpenSettings} onOpenHelp={onOpenHelp} onOpenShare={onOpenShare} />
+      <TopBar onOpenSettings={onOpenSettings} onOpenHelp={onOpenHelp} onOpenShare={onOpenShare} onOpenPrompt={onOpenPrompt} />
       {mobile ? <MobileBody /> : <DesktopBody />}
     </Box>
   )

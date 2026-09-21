@@ -275,7 +275,10 @@ export function TranscriptPanel() {
                   name={entry.speaker ?? nameOf(entry.agentId)}
                   // A canned demo answer must say so, or a first-time reader takes "the agents
                   // ignored my task" for the product being broken.
-                  demo={everyAgent.find((a) => a.id === entry.agentId)?.provider === 'mock'}
+                  demo={
+                    everyAgent.find((a) => a.id === entry.agentId)?.provider === 'mock' ||
+                    everyNode.some((n) => n.id === entry.agentId && n.kind === 'decision' && n.provider === 'mock')
+                  }
                   hue={entry.hue ?? hueOf(entry.agentId)}
                   where={entry.path?.map(nameOf)}
                   block={everyNode.some((n) => n.id === entry.agentId && n.kind === 'block')}
@@ -327,6 +330,7 @@ function Message({
   /** The speaker is a block node: this is what its inner run returned. */
   block?: boolean
 }) {
+  const decided = Boolean(entry.decision)
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
   const streaming = entry.status === 'streaming'
@@ -397,11 +401,22 @@ function Message({
           </>
         )}
         {block && <Chip size="small" label="block result" variant="outlined" sx={{ height: 17, fontSize: 10 }} />}
+        {decided && (
+          <Tooltip title="Typed answers from a decision model: no text was generated, the answers route the message">
+            <Chip size="small" label="decision" variant="outlined" color="info" sx={{ height: 17, fontSize: 10 }} />
+          </Tooltip>
+        )}
         {!human && !where?.length && to.length === 0 && entry.status === 'complete' && entry.text.trim() !== '' && (
           <Chip size="small" label="swarm output" sx={{ height: 17, fontSize: 10 }} />
         )}
         {demo && !human && (
-          <Tooltip title="Canned local text from the demo provider — not a model, and it does not read your task">
+          <Tooltip
+            title={
+              decided
+                ? 'The demo decider: it weighs options by the words they share with the message. Not a model.'
+                : 'Canned local text from the demo provider — not a model, and it does not read your task'
+            }
+          >
             <Chip size="small" label="demo" variant="outlined" sx={{ height: 17, fontSize: 10, opacity: 0.8 }} />
           </Tooltip>
         )}

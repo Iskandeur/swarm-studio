@@ -20,6 +20,7 @@ import {
 import ScienceRoundedIcon from '@mui/icons-material/ScienceRounded'
 import { useStore } from '../store'
 import { DEFAULT_ENDPOINTS, PROVIDERS, listModels, resolveEndpoint } from '../engine/providers'
+import { DECISION_PROVIDERS, DEFAULT_DECISION_ENDPOINTS } from '../engine/decisions'
 import type { ProviderId } from '../types'
 
 type Probe = { state: 'idle' | 'busy' | 'ok' | 'fail'; message?: string }
@@ -31,6 +32,8 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
   const setKey = useStore((s) => s.setKey)
   const endpoints = useStore((s) => s.endpoints)
   const setEndpoint = useStore((s) => s.setEndpoint)
+  const decisionEndpoints = useStore((s) => s.decisionEndpoints)
+  const setDecisionEndpoint = useStore((s) => s.setDecisionEndpoint)
   const discoveredModels = useStore((s) => s.discoveredModels)
   const setDiscoveredModels = useStore((s) => s.setDiscoveredModels)
   const [probes, setProbes] = useState<Partial<Record<ProviderId, Probe>>>({})
@@ -140,6 +143,65 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           })}
         </Stack>
 
+        <Divider sx={{ my: 3 }} />
+        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+          Decision models
+        </Typography>
+        <Typography variant="caption" sx={{ display: 'block', opacity: 0.65, mb: 2 }}>
+          Used by Decision nodes. These models (TypeSafe&apos;s Jev is the first) answer typed questions about a message
+          — a choice, a yes/no, a score — with probabilities, instead of writing text.
+        </Typography>
+        <Stack spacing={3} divider={<Divider flexItem />}>
+          {DECISION_PROVIDERS.filter((p) => p.keyId).map((provider) => (
+            <Stack key={provider.id} spacing={1.5}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="subtitle2">{provider.label}</Typography>
+                <Chip size="small" label={provider.models[0]} sx={{ height: 20, fontSize: 11, fontFamily: '"Roboto Mono", monospace' }} />
+              </Box>
+              {provider.hint && (
+                <Typography variant="caption" sx={{ opacity: 0.65, mt: -0.75 }}>
+                  {provider.hint}
+                </Typography>
+              )}
+              <TextField
+                label="Endpoint URL"
+                value={decisionEndpoints[provider.id] ?? ''}
+                onChange={(e) => setDecisionEndpoint(provider.id, e.target.value)}
+                placeholder={DEFAULT_DECISION_ENDPOINTS[provider.id]}
+                fullWidth
+                autoComplete="off"
+                spellCheck={false}
+                helperText={
+                  provider.id === 'typesafe'
+                    ? 'Empty = TypeSafe’s own API, which a browser page cannot call. Put a relay of your own here.'
+                    : 'Leave empty for the official endpoint.'
+                }
+              />
+              {provider.keyId === 'openrouter' ? (
+                <Typography variant="body2" sx={{ opacity: 0.8 }}>
+                  Uses the OpenRouter key above{keys.openrouter?.trim() ? ' (set).' : ' — not set yet.'}
+                </Typography>
+              ) : (
+                <TextField
+                  label={provider.keyLabel}
+                  type="password"
+                  value={(provider.keyId && keys[provider.keyId]) ?? ''}
+                  onChange={(e) => provider.keyId && setKey(provider.keyId, e.target.value)}
+                  autoComplete="off"
+                  fullWidth
+                  helperText={
+                    provider.keyUrl ? (
+                      <Link href={provider.keyUrl} target="_blank" rel="noreferrer" underline="hover">
+                        get a key
+                      </Link>
+                    ) : undefined
+                  }
+                />
+              )}
+            </Stack>
+          ))}
+        </Stack>
+
         <Typography variant="caption" sx={{ display: 'block', mt: 3, opacity: 0.65 }}>
           The app runs entirely in your browser, so a call only works if the endpoint allows your
           origin (CORS). Internal gateways often allow <code>localhost</code> and nothing else: in
@@ -149,7 +211,13 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         </Typography>
       </DialogContent>
       <DialogActions>
-        <Button color="inherit" onClick={() => PROVIDERS.forEach((p) => p.keyLabel && setKey(p.id, ''))}>
+        <Button
+          color="inherit"
+          onClick={() => {
+            PROVIDERS.forEach((p) => p.keyLabel && setKey(p.id, ''))
+            setKey('typesafe', '')
+          }}
+        >
           Clear keys
         </Button>
         <Button variant="contained" onClick={onClose}>

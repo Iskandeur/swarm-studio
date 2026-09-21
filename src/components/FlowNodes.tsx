@@ -4,6 +4,7 @@ import { Box, Chip, IconButton, LinearProgress, Tooltip, Typography, useMediaQue
 import { alpha, type Theme } from '@mui/material/styles'
 import AltRouteRoundedIcon from '@mui/icons-material/AltRouteRounded'
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
+import RuleRoundedIcon from '@mui/icons-material/RuleRounded'
 import CallMergeRoundedIcon from '@mui/icons-material/CallMergeRounded'
 import CheckRoundedIcon from '@mui/icons-material/CheckRounded'
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
@@ -14,7 +15,7 @@ import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded'
 import PanToolRoundedIcon from '@mui/icons-material/PanToolRounded'
 import PodcastsRoundedIcon from '@mui/icons-material/PodcastsRounded'
 import StorageRoundedIcon from '@mui/icons-material/StorageRounded'
-import type { AgentStatus, FlowNode, FlowNodeKind } from '../types'
+import type { AgentStatus, DecisionAnswer, DecisionAnswers, DecisionQuestion, FlowNode, FlowNodeKind } from '../types'
 import { agentColor, agentGlow } from '../theme'
 import { describePredicate } from '../engine/predicates'
 import { useStore } from '../store'
@@ -44,6 +45,8 @@ export type FlowNodeData = {
   ephemeral?: boolean
   /** Receives the task. */
   isEntry?: boolean
+  /** Decision: the typed answers of its last call in this run. */
+  answers?: DecisionAnswers
 }
 
 export type FlowFlowNode = Node<FlowNodeData, 'flow'>
@@ -65,6 +68,7 @@ const KIND_LABEL: Record<FlowNodeKind, string> = {
   human: 'Human gate',
   memory: 'Memory',
   block: 'Block',
+  decision: 'Decision',
 }
 
 export function FlowNodeView({ id, data, selected }: NodeProps<FlowFlowNode>): JSX.Element {
@@ -98,6 +102,8 @@ export function FlowNodeView({ id, data, selected }: NodeProps<FlowFlowNode>): J
       return <MemoryShape shell={shell} name={node.name} memoryMode={node.mode} wakeReaders={node.wakeReaders} seedCount={node.seed?.length ?? 0} />
     case 'block':
       return <BlockShape shell={shell} name={node.name} blockId={node.blockId} />
+    case 'decision':
+      return <DecisionShape shell={shell} name={node.name} model={node.model} demo={node.provider === 'mock'} questions={node.questions ?? []} />
     default:
       // A pasted spec from a newer version could carry a kind this build does not know. Throwing here
       // would blank the whole canvas; a plain card keeps the node visible, linkable and deletable.
@@ -600,6 +606,134 @@ function BlockShape({ shell, name, blockId }: { shell: Shell; name: string; bloc
         <Handles shell={shell} color={accent} />
       </Box>
     </Root>
+  )
+}
+
+/**
+ * A decision model: a card with a typed readout instead of words. Before a run it lists its questions;
+ * after a call, each question shows what was chosen, and the probability bars of the options, so the
+ * certainty that drives the routing is visible, not only the answer.
+ */
+function DecisionShape({
+  shell,
+  name,
+  model,
+  demo,
+  questions,
+}: {
+  shell: Shell
+  name: string
+  model: string
+  demo: boolean
+  questions: DecisionQuestion[]
+}) {
+  const { theme, data } = shell
+  const accent = theme.palette.info.main
+  const busy = data.status === 'thinking'
+  const answers = data.answers
+  return (
+    <Root shell={shell} label={`${KIND_LABEL.decision}: ${name}`}>
+      <Box
+        sx={{
+          position: 'relative',
+          width: 236,
+          px: 1.75,
+          py: 1.5,
+          borderRadius: '10px',
+          borderLeft: `4px solid ${accent}`,
+          ...frame(shell, { accentBorder: busy ? accent : undefined }),
+        }}
+      >
+        <DeleteButton shell={shell} name={name} />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5, pr: 2.5 }}>
+          <RuleRoundedIcon sx={{ fontSize: 18, color: accent, flexShrink: 0 }} />
+          <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>
+            {name}
+          </Typography>
+          <EntryBolt shell={shell} color={accent} />
+          <StatusBadge status={data.status} />
+        </Box>
+        <Typography
+          variant="caption"
+          noWrap
+          sx={{ display: 'block', fontFamily: '"Roboto Mono", monospace', fontSize: 10.5, opacity: 0.6, mb: 0.75 }}
+        >
+          {demo ? 'demo decider' : model || 'no model'} · no text generated
+        </Typography>
+        {busy && <LinearProgress color="info" sx={{ height: 3, borderRadius: 3, mb: 0.75 }} aria-label={`${name} is deciding`} />}
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+          {questions.slice(0, 3).map((q) => (
+            <DecisionReadout key={q.name} question={q} answer={answers?.[q.name]} accent={accent} />
+          ))}
+          {questions.length > 3 && (
+            <Typography variant="caption" sx={{ opacity: 0.6 }}>
+              +{questions.length - 3} more
+            </Typography>
+          )}
+          {questions.length === 0 && (
+            <Typography variant="caption" color="error">
+              no question yet
+            </Typography>
+          )}
+        </Box>
+        <Handles shell={shell} color={accent} />
+      </Box>
+    </Root>
+  )
+}
+
+function DecisionReadout({ question, answer, accent }: { question: DecisionQuestion; answer?: DecisionAnswer; accent: string }) {
+  const verdict = !answer
+    ? question.type
+    : answer.type === 'choice'
+      ? `${answer.choice} · ${Math.round(answer.confidence * 100)}%`
+      : answer.type === 'noul'
+        ? `${answer.yes ? 'yes' : 'no'} · p ${answer.noul.toFixed(2)}`
+        : `${answer.score.toFixed(1)} · ${Math.round(answer.confidence * 100)}%`
+  // One bar per option (choice, score), or one yes-bar (noul). Before the first answer: empty rails.
+  const bars: Array<{ label: string; p: number; chosen: boolean }> =
+    question.type === 'noul'
+      ? [{ label: 'yes', p: answer?.type === 'noul' ? answer.noul : 0, chosen: answer?.type === 'noul' && answer.yes }]
+      : question.type === 'choice'
+        ? (question.options ?? []).slice(0, 4).map((o) => ({
+            label: o.label,
+            p: answer?.type === 'choice' ? answer.probabilities[o.label] ?? 0 : 0,
+            chosen: answer?.type === 'choice' && answer.choice === o.label,
+          }))
+        : (question.levels ?? []).slice(0, 5).map((level, i) => ({
+            label: level,
+            p: answer?.type === 'score' ? answer.probabilities[String(i)] ?? 0 : 0,
+            chosen: answer?.type === 'score' && Math.round(answer.score) === i,
+          }))
+  return (
+    <Box data-testid={`decision-${question.name}`}>
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75 }}>
+        <Typography variant="caption" sx={{ fontFamily: '"Roboto Mono", monospace', fontSize: 10.5, opacity: 0.75 }}>
+          {question.name}
+        </Typography>
+        <Typography variant="caption" noWrap sx={{ ml: 'auto', fontWeight: answer ? 600 : 400, opacity: answer ? 1 : 0.5, fontSize: 11 }}>
+          {verdict}
+        </Typography>
+      </Box>
+      <Box sx={{ display: 'flex', gap: '2px', mt: 0.25 }} aria-hidden>
+        {bars.map((bar) => (
+          <Tooltip key={bar.label} title={`${bar.label}: ${Math.round(bar.p * 100)}%`}>
+            <Box sx={{ flex: 1, height: 5, borderRadius: 3, bgcolor: 'action.hover', overflow: 'hidden' }}>
+              <Box
+                sx={{
+                  height: '100%',
+                  width: `${Math.round(bar.p * 100)}%`,
+                  bgcolor: accent,
+                  opacity: bar.chosen ? 1 : 0.45,
+                  transition: 'width .5s ease',
+                  '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+                }}
+              />
+            </Box>
+          </Tooltip>
+        ))}
+      </Box>
+    </Box>
   )
 }
 

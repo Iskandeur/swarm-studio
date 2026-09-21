@@ -8,6 +8,8 @@
  */
 import type { ReactNode } from 'react'
 import {
+  Alert,
+  Autocomplete,
   Box,
   Button,
   Chip,
@@ -29,10 +31,15 @@ import OpenInFullRoundedIcon from '@mui/icons-material/OpenInFullRounded'
 import { allBlocks, useGraph, useStore } from '../store'
 import { accessEnds, accessGranted, canRead, canWrite, messageLinks, nameOfNode, nodesOf } from '../engine/graph'
 import { modelForProvider, PROVIDERS } from '../engine/providers'
+import { DECISION_PROVIDERS, decisionKey, decisionProviderInfo, questionProblems } from '../engine/decisions'
 import type {
   Access,
   BlockNode,
   ConditionNode,
+  DecisionNode,
+  DecisionProviderId,
+  DecisionQuestion,
+  DecisionQuestionType,
   Dispatch,
   FlowNode,
   Graph,
@@ -53,6 +60,7 @@ const KIND_TITLES: Record<FlowNode['kind'], string> = {
   human: 'HUMAN GATE',
   memory: 'MEMORY',
   block: 'BLOCK',
+  decision: 'DECISION',
 }
 
 const KIND_NOUNS: Record<FlowNode['kind'], string> = {
@@ -62,6 +70,7 @@ const KIND_NOUNS: Record<FlowNode['kind'], string> = {
   human: 'gate',
   memory: 'memory',
   block: 'block',
+  decision: 'decision',
 }
 
 const MEMORY_MODES: Array<{ mode: MemoryMode; label: string; meaning: string }> = [
@@ -78,6 +87,20 @@ const DISPATCHES: Array<{ value: Dispatch; label: string }> = [
 ]
 
 const BLOCK_SOURCES = { swarm: 'Embedded in this swarm', saved: 'Saved in this browser', builtin: 'Built-in' } as const
+
+/** The answers a guard can read, for every Decision node on this graph: what the editor offers. */
+function decisionPathsOf(graph: Graph): string[] {
+  const paths: string[] = []
+  for (const node of nodesOf(graph)) {
+    if (node.kind !== 'decision') continue
+    for (const q of node.questions ?? []) {
+      if (q.type === 'choice') paths.push(`${q.name}.choice`, `${q.name}.confidence`)
+      else if (q.type === 'noul') paths.push(`${q.name}.yes`, `${q.name}.noul`)
+      else paths.push(`${q.name}.score`, `${q.name}.level`, `${q.name}.confidence`)
+    }
+  }
+  return [...new Set(paths)]
+}
 
 /** A predicate reads a memory by NAME, so the names on this graph are what the editor offers. */
 function memoryNamesOf(graph: Graph): string[] {
@@ -140,10 +163,11 @@ export function NodeInspector({ nodeId }: { nodeId: string }): JSX.Element | nul
       {node.kind === 'human' && <HumanSection node={node} />}
       {node.kind === 'memory' && <MemorySection node={node} graph={graph} />}
       {node.kind === 'block' && <BlockSection node={node} />}
+      {node.kind === 'decision' && <DecisionSection node={node} />}
 
       {/* Only the kinds that can sensibly start a run: a block runs its graph on the task, a
           condition routes it. A join, a gate or a memory handed the task would have nothing to do. */}
-      {(node.kind === 'condition' || node.kind === 'block') && (
+      {(node.kind === 'condition' || node.kind === 'block' || node.kind === 'decision') && (
         <Box>
           <Chip
             size="small"
@@ -169,6 +193,7 @@ function ConditionSection({ node, graph }: { node: ConditionNode; graph: Graph }
         // A condition node always has a predicate: "no condition" on a node can only mean "always".
         onChange={(next) => updateNode(node.id, { predicate: next ?? { op: 'always' } })}
         memoryNames={memoryNamesOf(graph)}
+        decisionPaths={decisionPathsOf(graph)}
       />
       <Caption>Links out of a condition are labelled true / false; an unlabelled one counts as true.</Caption>
     </Stack>
@@ -495,6 +520,294 @@ function BlockSection({ node }: { node: BlockNode }) {
   )
 }
 
+const QUESTION_TYPES: Array<{ type: DecisionQuestionType; label: string; meaning: string }> = [
+  { type: 'choice', label: 'Choice', meaning: 'Picks one label. Answers choice, confidence and a probability per label.' },
+  { type: 'noul', label: 'Yes / no', meaning: 'Answers the probability of yes (noul), and yes = true when it is at least 0.5.' },
+  { type: 'score', label: 'Score', meaning: 'Rates on ordered levels, lowest first. Answers the expected level, its name and a confidence.' },
+]
+
+function newQuestion(taken: string[]): DecisionQuestion {
+  let name = 'question'
+  for (let i = 2; taken.includes(name); i++) name = `question${i}`
+  return {
+    name,
+    type: 'choice',
+    instructions: '',
+    options: [
+      { label: 'yes', criterion: '' },
+      { label: 'no', criterion: '' },
+    ],
+  }
+}
+
+/** The question after its type changed, keeping what still applies. */
+function retype(question: DecisionQuestion, type: DecisionQuestionType): DecisionQuestion {
+  const { options: _options, levels: _levels, ...rest } = question
+  if (type === 'score') return { ...rest, type, levels: question.levels?.length ? question.levels : ['low', 'medium', 'high'] }
+  if (type === 'noul') return { ...rest, type }
+  return {
+    ...rest,
+    type,
+    options: question.options?.length ? question.options : [{ label: 'yes', criterion: '' }, { label: 'no', criterion: '' }],
+  }
+}
+
+function DecisionSection({ node }: { node: DecisionNode }) {
+  const updateNode = useStore((s) => s.updateNode)
+  const keys = useStore((s) => s.keys)
+  const questions = Array.isArray(node.questions) ? node.questions : []
+  const info = decisionProviderInfo(node.provider)
+  const problems = questionProblems(questions)
+  const missingKey = node.provider !== 'mock' && decisionKey(node.provider, keys) === ''
+  const setQuestions = (next: DecisionQuestion[]) => updateNode(node.id, { questions: next })
+  const put = (index: number, next: DecisionQuestion) => setQuestions(questions.map((q, i) => (i === index ? next : q)))
+
+  return (
+    <>
+      <Caption>
+        A decision model answers typed questions about what reaches it. It writes no text: it forwards the message with
+        its answers attached, and the conditions on its outgoing links route on them.
+      </Caption>
+
+      <TextField
+        select
+        label="Decision provider"
+        value={node.provider}
+        onChange={(e) => {
+          const provider = e.target.value as DecisionProviderId
+          updateNode(node.id, { provider, model: decisionProviderInfo(provider).models[0] ?? '' })
+        }}
+        helperText={info.hint}
+        fullWidth
+      >
+        {DECISION_PROVIDERS.map((p) => (
+          <MenuItem key={p.id} value={p.id}>
+            {p.label}
+          </MenuItem>
+        ))}
+      </TextField>
+
+      <Autocomplete
+        freeSolo
+        options={info.models}
+        value={node.model}
+        onInputChange={(_, next) => {
+          if (next !== node.model) updateNode(node.id, { model: next })
+        }}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Model"
+            error={node.provider !== 'mock' && node.model.trim() === ''}
+            helperText="Free text: any model that speaks the same typed-question API"
+          />
+        )}
+      />
+
+      {missingKey && (
+        <Alert severity="warning" variant="outlined">
+          No {info.keyLabel.replace(/ \(.*\)$/, '')} yet. Add it in Settings → Providers, or the run will stop here.
+        </Alert>
+      )}
+
+      <Box>
+        <Label>Questions · {questions.length}</Label>
+        <Stack spacing={2}>
+          {questions.map((question, index) => (
+            <QuestionEditor
+              key={index}
+              index={index}
+              question={question}
+              onChange={(next) => put(index, next)}
+              onRemove={() => setQuestions(questions.filter((_, i) => i !== index))}
+            />
+          ))}
+        </Stack>
+        <Button
+          size="small"
+          startIcon={<AddRoundedIcon />}
+          onClick={() => setQuestions([...questions, newQuestion(questions.map((q) => q.name))])}
+          sx={{ mt: 1 }}
+        >
+          Add question
+        </Button>
+      </Box>
+
+      {problems.length > 0 && (
+        <Stack spacing={0.25}>
+          {problems.map((p) => (
+            <Caption key={p} tone="error">
+              {p}
+            </Caption>
+          ))}
+        </Stack>
+      )}
+
+      <Caption>
+        Route with a condition on each outgoing link: Decision answer route.choice = billing, route.confidence &lt; 0.6,
+        blocked.yes = true. Mark one link Default branch to catch whatever no other link takes.
+      </Caption>
+    </>
+  )
+}
+
+function QuestionEditor({
+  index,
+  question,
+  onChange,
+  onRemove,
+}: {
+  index: number
+  question: DecisionQuestion
+  onChange: (next: DecisionQuestion) => void
+  onRemove: () => void
+}) {
+  const options = question.options ?? []
+  const levels = question.levels ?? []
+  const n = index + 1
+  return (
+    <Box role="group" aria-label={`Question ${n}`} sx={{ pl: 1.5, borderLeft: '2px solid', borderColor: 'divider' }}>
+      <Stack spacing={1.25}>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+          <TextField
+            size="small"
+            label="Name"
+            value={question.name}
+            onChange={(e) => onChange({ ...question, name: e.target.value.replace(/\s+/g, '_') })}
+            slotProps={{ htmlInput: { 'aria-label': `Question ${n} name`, spellCheck: false, style: { fontFamily: '"Roboto Mono", monospace' } } }}
+            sx={{ flex: 1 }}
+          />
+          <TextField
+            select
+            size="small"
+            label="Type"
+            value={question.type}
+            onChange={(e) => onChange(retype(question, e.target.value as DecisionQuestionType))}
+            sx={{ width: 130, flexShrink: 0 }}
+          >
+            {QUESTION_TYPES.map((t) => (
+              <MenuItem key={t.type} value={t.type}>
+                {t.label}
+              </MenuItem>
+            ))}
+          </TextField>
+          <Tooltip title="Remove this question">
+            <IconButton size="small" aria-label={`Remove question ${n}`} onClick={onRemove} sx={{ mt: 0.5 }}>
+              <DeleteOutlineRoundedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+        <Caption>{QUESTION_TYPES.find((t) => t.type === question.type)?.meaning}</Caption>
+        <TextField
+          size="small"
+          label="Instructions"
+          value={question.instructions}
+          onChange={(e) => onChange({ ...question, instructions: e.target.value })}
+          placeholder={question.type === 'noul' ? 'Is the customer blocked right now?' : 'Which team should answer this?'}
+          slotProps={{ htmlInput: { 'aria-label': `Question ${n} instructions` } }}
+          multiline
+          fullWidth
+        />
+
+        {question.type === 'choice' && (
+          <Stack spacing={1}>
+            {options.map((option, i) => (
+              <Box key={i} sx={{ display: 'flex', gap: 0.5, alignItems: 'flex-start' }}>
+                <TextField
+                  size="small"
+                  label="Label"
+                  value={option.label}
+                  onChange={(e) => onChange({ ...question, options: options.map((o, j) => (j === i ? { ...o, label: e.target.value } : o)) })}
+                  slotProps={{ htmlInput: { 'aria-label': `Question ${n} option ${i + 1} label` } }}
+                  sx={{ width: 110, flexShrink: 0 }}
+                />
+                <TextField
+                  size="small"
+                  label="When"
+                  value={option.criterion}
+                  onChange={(e) => onChange({ ...question, options: options.map((o, j) => (j === i ? { ...o, criterion: e.target.value } : o)) })}
+                  slotProps={{ htmlInput: { 'aria-label': `Question ${n} option ${i + 1} criterion` } }}
+                  fullWidth
+                />
+                <Tooltip title="Remove this option">
+                  <IconButton
+                    size="small"
+                    aria-label={`Remove option ${i + 1} of question ${n}`}
+                    onClick={() => onChange({ ...question, options: options.filter((_, j) => j !== i) })}
+                  >
+                    <DeleteOutlineRoundedIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            ))}
+            <Button
+              size="small"
+              startIcon={<AddRoundedIcon />}
+              onClick={() => onChange({ ...question, options: [...options, { label: '', criterion: '' }] })}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              Add option
+            </Button>
+          </Stack>
+        )}
+
+        {question.type === 'noul' &&
+          (['true', 'false'] as const).map((side) => {
+            const current = options.find((o) => o.label === side)?.criterion ?? ''
+            return (
+              <TextField
+                key={side}
+                size="small"
+                label={side === 'true' ? 'Yes means (optional)' : 'No means (optional)'}
+                value={current}
+                onChange={(e) => {
+                  const rest = options.filter((o) => o.label !== side)
+                  const next = e.target.value ? [...rest, { label: side, criterion: e.target.value }] : rest
+                  const { options: _previous, ...base } = question
+                  onChange(next.length > 0 ? { ...base, options: next } : base)
+                }}
+                fullWidth
+              />
+            )
+          })}
+
+        {question.type === 'score' && (
+          <Stack spacing={1}>
+            {levels.map((level, i) => (
+              <Box key={i} sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                <TextField
+                  size="small"
+                  label={i === 0 ? 'Level 0 (lowest)' : `Level ${i}`}
+                  value={level}
+                  onChange={(e) => onChange({ ...question, levels: levels.map((l, j) => (j === i ? e.target.value : l)) })}
+                  fullWidth
+                />
+                <Tooltip title="Remove this level">
+                  <IconButton
+                    size="small"
+                    aria-label={`Remove level ${i} of question ${n}`}
+                    onClick={() => onChange({ ...question, levels: levels.filter((_, j) => j !== i) })}
+                  >
+                    <DeleteOutlineRoundedIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            ))}
+            <Button
+              size="small"
+              startIcon={<AddRoundedIcon />}
+              onClick={() => onChange({ ...question, levels: [...levels, ''] })}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              Add level
+            </Button>
+          </Stack>
+        )}
+      </Stack>
+    </Box>
+  )
+}
+
 /* ------------------------------------------------------------------------------------------------ */
 /* Links                                                                                             */
 /* ------------------------------------------------------------------------------------------------ */
@@ -560,6 +873,7 @@ function AccessFields({ link, graph }: { link: Link; graph: Graph }) {
 
 function MessageLinkFields({ link, graph }: { link: Link; graph: Graph }) {
   const updateLink = useStore((s) => s.updateLink)
+  const fromDecision = nodesOf(graph).find((n) => n.id === link.source)?.kind === 'decision'
   return (
     <>
       <TextField
@@ -583,7 +897,11 @@ function MessageLinkFields({ link, graph }: { link: Link; graph: Graph }) {
           }
           label="Default branch"
         />
-        <Caption>Taken when an agent that chooses its branch names none that exists.</Caption>
+        <Caption>
+          {fromDecision
+            ? 'Taken only when no other link out of this Decision node matches: the else branch, where an unsure answer escalates.'
+            : 'Taken when an agent that chooses its branch names none that exists.'}
+        </Caption>
       </Box>
 
       <Box>
@@ -592,6 +910,7 @@ function MessageLinkFields({ link, graph }: { link: Link; graph: Graph }) {
           value={link.guard}
           onChange={(next) => updateLink(link.id, { guard: next })}
           memoryNames={memoryNamesOf(graph)}
+          decisionPaths={decisionPathsOf(graph)}
           allowNone
         />
       </Box>

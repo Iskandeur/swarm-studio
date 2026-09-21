@@ -50,6 +50,7 @@ export function GraphCanvas({ onAgentOpen, children }: { onAgentOpen?: () => voi
   const memoryEntries = useStore((s) => s.memoryEntries)
   const flashes = useStore((s) => s.flashes)
   const skippedLinks = useStore((s) => s.skippedLinks)
+  const decisions = useStore((s) => s.decisions)
   const select = useStore((s) => s.select)
   const selectLink = useStore((s) => s.selectLink)
   const moveAgent = useStore((s) => s.moveAgent)
@@ -118,6 +119,7 @@ export function GraphCanvas({ onAgentOpen, children }: { onAgentOpen?: () => voi
         ...(node.kind === 'memory' ? { memoryCount: entries?.length ?? node.seed.length } : {}),
         ...(writer ? { lastWriter: { name: writer.name, hue: writer.hue } } : {}),
         ...(blockProgress ? { blockProgress } : {}),
+        ...(node.kind === 'decision' && !inBlock && decisions[node.id] ? { answers: decisions[node.id] } : {}),
         ephemeral,
         isEntry: !ephemeral && entryIds.includes(node.id),
       }
@@ -140,7 +142,7 @@ export function GraphCanvas({ onAgentOpen, children }: { onAgentOpen?: () => voi
         ...extra.nodes.map((n) => build<FlowFlowNode>(n.id, 'flow', n.position, flowData(n, true), false)),
       ]
     })
-  }, [graph, flowNodes, extra, statuses, nestedStatuses, entryIds, live, selectedId, memoryEntries, flashes, inBlock])
+  }, [graph, flowNodes, extra, statuses, nestedStatuses, entryIds, live, selectedId, memoryEntries, flashes, inBlock, decisions])
 
   /**
    * `fitView` on the component runs with whatever sizes React Flow has at mount, and on a phone the
