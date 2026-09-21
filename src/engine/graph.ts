@@ -86,8 +86,14 @@ export function writableMemories(graph: Graph, agentId: string): MemoryNode[] {
 }
 
 /**
- * Nodes that receive the task: the explicit entry list, or every agent or block with no incoming
- * MESSAGE link. Access links do not count — a memory feeding an agent does not make it a follower.
+ * Kinds that take a turn in a round, like an agent: they cost a call and time, so they are scheduled,
+ * not resolved inline. A block runs a nested graph; a decision asks a decision model.
+ */
+export const TURN_KINDS: ReadonlySet<FlowNode['kind']> = new Set(['block', 'decision'])
+
+/**
+ * Nodes that receive the task: the explicit entry list, or every agent, block or decision with no
+ * incoming MESSAGE link. Access links do not count — a memory feeding an agent does not make it a follower.
  */
 export function resolveEntryIds(graph: Graph): string[] {
   const known = nodeIds(graph)
@@ -95,7 +101,7 @@ export function resolveEntryIds(graph: Graph): string[] {
   const hasIncoming = new Set(messageLinks(graph).map((l) => l.target))
   const speakers = [
     ...graph.agents.map((a) => a.id),
-    ...nodesOf(graph).filter((n) => n.kind === 'block').map((n) => n.id),
+    ...nodesOf(graph).filter((n) => TURN_KINDS.has(n.kind)).map((n) => n.id),
   ]
   const roots = speakers.filter((id) => !hasIncoming.has(id))
   if (roots.length > 0) return roots

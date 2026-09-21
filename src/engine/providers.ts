@@ -550,6 +550,14 @@ export const DEMO_VOICES: Record<string, string[]> = {
   'Part Two Worker': ['Second third: done. Also, there is a typo in the first third.'],
   'Part Three Worker': ['Last third: fine. Please note that it is fine.'],
   'Reducer': ['Merged: three thirds make a whole, which surprised nobody except the second worker.'],
+
+  // Triage (System 1 → System 2): only the desk the decision picks ever speaks.
+  'Billing Desk': ['I can see the double charge and I am refunding the second one now; it will be back on your card within five days.'],
+  'Tech Desk': ['That crash is a known issue in the billing screen on older app versions: update the app and it opens again.'],
+  'Account Desk': ['I have sent a reset link to the address on file; it expires in an hour.'],
+  'Senior Agent (System 2)': [
+    'Two separate problems here, and one probably caused the other. First, the double charge: the second payment is a retry that went through after a timeout, so I am refunding it now. Second, the crash: the billing screen fails to load an invoice with two payments on it, which is exactly your case; it is fixed in the latest app version. Update the app, and your billing page will open and show one charge and one refund.',
+  ],
 }
 
 /** The agent's name as `buildSystem` writes it — the only stable handle the mock has. */

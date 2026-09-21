@@ -3,9 +3,12 @@ import type {
   Agent,
   AgentStatus,
   BlockDef,
+  DecisionAnswers,
+  DecisionProviderId,
   FlowNode,
   FlowNodeKind,
   Graph,
+  KeyId,
   Link,
   MemoryEntry,
   ProviderId,
@@ -21,6 +24,7 @@ import { runSwarm, type OutputEvent, type TransitPacket } from './engine/runner'
 import { createRunSession, type GateDecision, type PendingGate, type RunSession } from './engine/session'
 import { rekey } from './engine/portable'
 import { nodesOf, resolveEntryIds } from './engine/graph'
+import { decisionProviderInfo, type DecisionEndpoints } from './engine/decisions'
 
 const SPEC_KEY = 'swarm-studio.spec.v1'
 const KEYS_KEY = 'swarm-studio.keys.v1'
@@ -28,6 +32,7 @@ const THEME_KEY = 'swarm-studio.theme.v1'
 const ENDPOINTS_KEY = 'swarm-studio.endpoints.v1'
 const MODELS_KEY = 'swarm-studio.models.v1'
 const LIBRARY_KEY = 'swarm-studio.blocks.v1'
+const DECISION_ENDPOINTS_KEY = 'swarm-studio.decision-endpoints.v1'
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -132,9 +137,12 @@ interface State {
   future: SwarmSpec[]
   /** Transient, non-fatal message from a run (e.g. a model that refused a parameter). */
   notice?: string
-  keys: Partial<Record<ProviderId, string>>
+  /** API keys by slot: the chat providers, plus TypeSafe's own for Decision nodes. */
+  keys: Partial<Record<KeyId, string>>
   /** Per-provider endpoint override. Typed by the user, kept in this browser only. */
   endpoints: Partial<Record<ProviderId, string>>
+  /** The same for Decision nodes: a relay for TypeSafe, which refuses browser origins. */
+  decisionEndpoints: DecisionEndpoints
   /** Models discovered from an endpoint's /models, offered as autocomplete options. */
   discoveredModels: Partial<Record<ProviderId, string[]>>
   themeMode: 'light' | 'dark'
@@ -152,6 +160,8 @@ interface State {
   flashes: Record<string, number>
   /** Links a branch decision did not take this round, dimmed on the canvas. */
   skippedLinks: string[]
+  /** The last typed answers of each top-level Decision node, for its bars. */
+  decisions: Record<string, DecisionAnswers>
 
   setSpec: (patch: Partial<SwarmSpec>) => void
   loadPreset: (spec: SwarmSpec) => void
@@ -182,8 +192,9 @@ interface State {
   redo: () => void
   dismissNotice: () => void
   setTopology: (topology: Topology) => void
-  setKey: (provider: ProviderId, value: string) => void
+  setKey: (slot: KeyId, value: string) => void
   setEndpoint: (provider: ProviderId, value: string) => void
+  setDecisionEndpoint: (provider: DecisionProviderId, value: string) => void
   setDiscoveredModels: (provider: ProviderId, models: string[]) => void
   toggleTheme: () => void
 
@@ -226,6 +237,24 @@ const NODE_DEFAULTS: { [K in Exclude<FlowNodeKind, 'block'>]: (index: number) =>
   join: () => ({ kind: 'join', name: 'Join', mode: 'all' }),
   output: () => ({ kind: 'output', name: 'Output' }),
   human: () => ({ kind: 'human', name: 'Human gate', prompt: 'Let this through?' }),
+  decision: () => ({
+    kind: 'decision',
+    name: 'Decision',
+    provider: 'mock',
+    model: decisionProviderInfo('mock').models[0],
+    questions: [
+      {
+        name: 'route',
+        type: 'choice',
+        instructions: 'What kind of message is this?',
+        options: [
+          { label: 'question', criterion: 'asks for information' },
+          { label: 'request', criterion: 'asks for something to be done' },
+          { label: 'other', criterion: 'anything else' },
+        ],
+      },
+    ],
+  }),
   memory: (index) => ({
     kind: 'memory',
     name: index === 0 ? 'Memory' : `Memory ${index + 1}`,
@@ -307,6 +336,7 @@ export const useStore = create<State>((set, get) => {
     outputs: [],
     flashes: {},
     skippedLinks: [],
+    decisions: {},
   }
 
   /**
@@ -330,7 +360,7 @@ export const useStore = create<State>((set, get) => {
    * which is what lets a finished run pick up with every agent's memory intact.
    */
   const launch = (state: State, options: { startFrom?: string[]; keepTranscript?: boolean }) => {
-    const { spec, keys, endpoints } = state
+    const { spec, keys, endpoints, decisionEndpoints } = state
     controller?.abort()
     controller = new AbortController()
     if (!options.keepTranscript || !session) session = createRunSession()
@@ -430,6 +460,13 @@ export const useStore = create<State>((set, get) => {
             flashes: { ...s.flashes, [event.memoryId]: Date.now() },
           }))
         },
+        onDecision: (event) => {
+          if (!fresh() || event.path.length > 0) return
+          set((s) => ({
+            decisions: { ...s.decisions, [event.nodeId]: event.answers },
+            flashes: { ...s.flashes, [event.nodeId]: Date.now() },
+          }))
+        },
         onNodeFired: (event) => {
           if (!fresh() || event.path.length > 0) return
           set((s) => ({ flashes: { ...s.flashes, [event.nodeId]: Date.now() } }))
@@ -443,7 +480,7 @@ export const useStore = create<State>((set, get) => {
         onOutput: (event) => fresh() && set((s) => ({ outputs: [...s.outputs, event] })),
       },
       controller.signal,
-      { endpoints, session, startFrom: options.startFrom, library: [...BUILTIN_BLOCKS, ...state.library] },
+      { endpoints, decisionEndpoints, session, startFrom: options.startFrom, library: [...BUILTIN_BLOCKS, ...state.library] },
     )
   }
 
@@ -463,6 +500,7 @@ export const useStore = create<State>((set, get) => {
     transit: [],
     keys: load(KEYS_KEY, {}),
     endpoints: load(ENDPOINTS_KEY, {}),
+    decisionEndpoints: load(DECISION_ENDPOINTS_KEY, {}),
     discoveredModels: load(MODELS_KEY, {}),
     themeMode: load<'light' | 'dark'>(THEME_KEY, 'dark'),
     library: load<BlockDef[]>(LIBRARY_KEY, []),
@@ -472,6 +510,7 @@ export const useStore = create<State>((set, get) => {
     outputs: [],
     flashes: {},
     skippedLinks: [],
+    decisions: {},
 
     // Typed character by character, so it stays out of the undo stack.
     setSpec: (patch) => mutate((spec) => ({ ...spec, ...patch }), { history: false }),
@@ -551,7 +590,13 @@ export const useStore = create<State>((set, get) => {
         const index = nodes.filter((n) => n.kind === kind).length
         const count = graph.agents.length + nodes.length
         const at = position ?? { x: 140 + (count % 4) * 220, y: 320 + Math.floor(count / 4) * 150 }
-        graph.nodes = [...nodes, { ...NODE_DEFAULTS[kind](index), id, position: at } as FlowNode]
+        const node = { ...NODE_DEFAULTS[kind](index), id, position: at } as FlowNode
+        // The key is already there: a new Decision node starts on the real model, not the demo.
+        if (node.kind === 'decision' && get().keys.openrouter?.trim()) {
+          node.provider = 'openrouter'
+          node.model = decisionProviderInfo('openrouter').models[0]
+        }
+        graph.nodes = [...nodes, node]
       })
       set({ selectedId: id, selectedLinkId: undefined })
       return id
@@ -761,8 +806,8 @@ export const useStore = create<State>((set, get) => {
     dismissNotice: () => set({ notice: undefined }),
     setTopology: (topology) => mutate((spec) => ({ ...spec, topology })),
 
-    setKey: (provider, value) => {
-      const keys = { ...get().keys, [provider]: value }
+    setKey: (slot, value) => {
+      const keys = { ...get().keys, [slot]: value }
       localStorage.setItem(KEYS_KEY, JSON.stringify(keys))
       set({ keys })
     },
@@ -771,6 +816,12 @@ export const useStore = create<State>((set, get) => {
       const endpoints = { ...get().endpoints, [provider]: value }
       localStorage.setItem(ENDPOINTS_KEY, JSON.stringify(endpoints))
       set({ endpoints })
+    },
+
+    setDecisionEndpoint: (provider, value) => {
+      const decisionEndpoints = { ...get().decisionEndpoints, [provider]: value }
+      localStorage.setItem(DECISION_ENDPOINTS_KEY, JSON.stringify(decisionEndpoints))
+      set({ decisionEndpoints })
     },
 
     setDiscoveredModels: (provider, models) => {

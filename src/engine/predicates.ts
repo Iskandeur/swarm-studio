@@ -89,6 +89,11 @@ export interface PredicateContext {
   round: number
   /** Value of `key` in the memory node NAMED `memory` (match names case-insensitively, trimmed), or undefined. */
   readMemory: (memory: string, key: string) => string | undefined
+  /**
+   * Typed answers a Decision node attached to the message, by question name. Absent when no Decision
+   * node is upstream: a `decision` condition is then false, with a problem that says why.
+   */
+  decision?: Record<string, unknown>
 }
 
 export interface Evaluation {
@@ -181,6 +186,17 @@ function run(node: unknown, scope: Scope, depth: number): Evaluation {
       const comparison = readComparison('json', node)
       if (typeof comparison === 'string') return fail(comparison)
       return pass(compare(readPath(scope.json(), node.path), comparison.cmp, comparison.value))
+    }
+
+    case 'decision': {
+      if (typeof node.path !== 'string' || !node.path.trim()) return fail('decision: "path" must name an answer, like route.choice')
+      if (node.path.split('.').some((segment) => !segment.trim())) {
+        return fail(`decision: the path "${clip(node.path)}" has an empty segment`)
+      }
+      const comparison = readComparison('decision', node)
+      if (typeof comparison === 'string') return fail(comparison)
+      if (!isRecord(scope.ctx?.decision)) return fail('decision: no Decision node answered upstream of this message')
+      return pass(compare(readPath(scope.ctx.decision, node.path), comparison.cmp, comparison.value))
     }
 
     case 'memory': {
@@ -504,6 +520,10 @@ function describe(node: unknown, depth: number): string {
       const path = typeof node.path === 'string' ? node.path.trim() : '?'
       return `JSON${path ? ` ${clip(path)}` : ''} ${describeComparison(node.cmp, node.value)}`
     }
+    case 'decision': {
+      const path = typeof node.path === 'string' ? clip(node.path.trim()) : '?'
+      return `decision ${path || '?'} ${describeComparison(node.cmp, node.value)}`
+    }
     case 'memory': {
       const memory = typeof node.memory === 'string' ? clip(node.memory.trim()) : '?'
       const key = typeof node.key === 'string' ? clip(node.key.trim()) : '?'
@@ -603,6 +623,13 @@ function read(raw: unknown, depth: number): Predicate | undefined {
       const comparison = readLooseComparison(raw)
       if (path === undefined || !comparison) return undefined
       return { op: 'json', path, ...comparison }
+    }
+
+    case 'decision': {
+      const path = typeof raw.path === 'string' ? raw.path.trim() : ''
+      const comparison = readLooseComparison(raw)
+      if (!path || !comparison) return undefined
+      return { op: 'decision', path, ...comparison }
     }
 
     case 'memory': {

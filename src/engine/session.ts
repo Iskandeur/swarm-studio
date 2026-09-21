@@ -18,6 +18,7 @@
  */
 import type { ChatMessage } from './providers.ts'
 import type { MemoryState } from './memory.ts'
+import type { DecisionAnswers } from '../types.ts'
 
 export interface Injection {
   /** Which agent receives it. */
@@ -46,6 +47,12 @@ export interface Delivery {
   kind: 'task' | 'part' | 'human' | 'system' | 'bus' | 'delegation'
   author?: string
   text: string
+  /**
+   * Typed answers a Decision node attached. They travel with the message through zero-token nodes,
+   * so a guard two hops downstream can still read `route.choice`; the next agent's turn is a new
+   * message and does not carry them.
+   */
+  decision?: DecisionAnswers
 }
 
 /** Everything a graph level remembers between rounds, and between a run and its continuation. */
