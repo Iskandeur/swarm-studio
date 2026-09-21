@@ -612,21 +612,22 @@ export const useStore = create<State>((set, get) => {
 
     replaceSwarm: (incoming) => {
       haltRun()
-      const spec = structuredClone(incoming)
-      persistSpec(spec)
-      set({
+      const next = structuredClone(incoming)
+      const previous = get().spec
+      persistSpec(next)
+      set((s) => ({
         ...clearedRun,
-        spec,
+        spec: next,
         phase: 'idle',
         error: undefined,
         notice: undefined,
-        selectedId: spec.agents[0]?.id,
+        selectedId: next.agents[0]?.id,
         selectedLinkId: undefined,
         editingBlockId: undefined,
         multiIds: [],
-        past: [],
+        past: [...s.past, previous].slice(-HISTORY_DEPTH),
         future: [],
-      })
+      }))
     },
 
     applyToAgents: (ids, patch) => {
