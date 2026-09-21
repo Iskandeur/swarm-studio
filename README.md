@@ -10,8 +10,11 @@ Press Run, and watch the conversation travel through the graph as it happens —
 they think, messages slide along the links they are actually sent on, the transcript fills in live.
 
 It is also a graph-engineering workbench: conditional branches, joins, human approval gates, shared
-memory between agents, reusable blocks that can contain themselves, and agents that spawn other
-agents live on the canvas.
+memory between agents, reusable blocks that can contain themselves, agents that spawn other agents
+live on the canvas, and typed **decision models** (TypeSafe's Jev) that route in one cheap call and
+escalate to an LLM only when unsure.
+
+Or skip the clicking: **describe the swarm you want**, and a model writes the graph.
 
 No backend, no build step to deploy, no account. A demo provider ships with the app, so the whole
 thing is usable — and demoable — with no API key at all.
@@ -26,10 +29,12 @@ order. This app makes the shape the primary object, and the run a thing you can 
 
 | | |
 | --- | --- |
+| **Prompt the graph** | Describe the swarm in a sentence (*"a support triage where anything unsure escalates to a senior agent"*) and a model writes it, streamed, in the same JSON format as Share. It goes through the same reader, plus an audit of anything the reader would have dropped, gets one automatic repair if it does not load, and lands as a single undo step — or nothing lands and the error says why. **Edit current** sends the swarm with the change to make and keeps every id. Uses the provider and model you already configured; with no key, a demo generator picks a matching preset and says so. |
+| **Route with a decision model** | A **Decision** node asks a typed decision model — TypeSafe's **Jev** and the models like it — `choice`, yes/no and `score` questions about what reached it. No text is generated: it forwards the message with typed answers (choice, probabilities, confidence) that link conditions route on (`route.choice = billing`, `route.confidence < 0.6`). A *default* link catches everything else, which is the System 1 → System 2 pattern: cheap routing when sure, an LLM when not. The node shows its answer and a probability bar per option. Through OpenRouter's decisions endpoint with your OpenRouter key, or TypeSafe's API through a relay; a demo decider runs it with no key. |
 | **Build a topology** | Drag agents around; drag from a node's right dot to another node's left dot to grant "may speak to". Links are directed, so hierarchies, rings and meshes are all expressible. |
 | **Configure each agent** | Provider, model (free text — a new model release needs no code change), system prompt, temperature, colour. |
 | **Choose a propagation rule** | `Broadcast` — every outgoing link carries the message. `Round-robin` — one link per turn, rotating. `Manager` — the entry agent delegates, workers report back, the manager speaks again with every reply in hand. |
-| **Branch on conditions** | A link can carry a condition (message contains, matches a pattern, a JSON field compares, a shared-memory key has a value, this link has fired fewer than N times). Zero-token **Condition** nodes send to their `true` or `false` side, a **Join** waits for every branch, an **Output** marks the result. An agent set to *choose* names its branch itself with `<route to="…"/>`. Conditions are data, never code: a pasted swarm cannot run anything. |
+| **Branch on conditions** | A link can carry a condition (message contains, matches a pattern, a JSON field compares, a shared-memory key has a value, a decision model's answer compares, this link has fired fewer than N times). Zero-token **Condition** nodes send to their `true` or `false` side, a **Join** waits for every branch, an **Output** marks the result. An agent set to *choose* names its branch itself with `<route to="…"/>`. Conditions are data, never code: a pasted swarm cannot run anything. |
 | **Put a human in the loop** | A **Human gate** stops the flow and asks you. Approve, reject, or edit the text before it goes on. |
 | **Share knowledge between agents** | A **Memory** node is a blackboard (shared keys), a log, or a co-written document. Draw agent → memory to let it write (`<write memory="…">`), memory → agent to let it read. A reader sees the memory in its prompt within a character budget, ranked by relevance when it does not fit; seed it with reference text and it is a knowledge base. Turn on *wake readers* and it becomes a publish-subscribe bus. |
 | **Reuse and recurse** | Save any selection as a **Block**, drop it anywhere as one node, double-click to edit its inside (every instance follows). A block may contain itself: nested runs share the swarm's round budget and stop at the depth limit. Four built-ins: Critic loop, Debate, Map-reduce, Recursive solver. |
@@ -49,6 +54,14 @@ order. This app makes the shape the primary object, and the run a thing you can 
 | **OpenAI** | yes | `/chat/completions`, streamed. |
 | **OpenRouter** | yes | `/chat/completions`, streamed. |
 | **Custom** | usually | Any endpoint that speaks OpenAI's `/chat/completions`: vLLM, Ollama, LM Studio, LiteLLM, a company gateway. You supply the URL. |
+
+Decision nodes have their own providers, in the same dialog:
+
+| Decision provider | Key | Notes |
+| --- | --- | --- |
+| **Demo decider** | no | Weighs each option by the words it shares with the message. Deterministic, badged `demo`. |
+| **OpenRouter decisions** | the OpenRouter key | `/api/alpha/decisions`, model `typesafe/jev-1.13`. Callable straight from the browser. |
+| **TypeSafe** | a TypeSafe key | `/v1/systemone`, same request. TypeSafe's API refuses browser origins, so from the published site it needs a relay of yours in its Endpoint URL field. |
 
 **Every** provider's endpoint URL is overridable in Providers, so routing an agent through a mirror,
 a gateway or a proxy never needs a code change. *Test and list models* calls the endpoint's `/models`
@@ -104,7 +117,7 @@ Everything the UI animates comes out of engine callbacks (`onAgentStatus`, `onMe
 src/
   types.ts              domain model
   store.ts              zustand store, localStorage persistence
-  presets.ts            six starter swarms
+  presets.ts            seven starter swarms
   blocks.ts             built-in blocks
   theme.ts              Material theme + per-agent colour derivation
   engine/
@@ -115,8 +128,11 @@ src/
     memory.ts           shared memory: writes, and what a reader sees
     graph.ts            reading a v1 or v2 graph the same way
     portable.ts         the interchange format
+    decisions.ts        decision models (Jev): request, strict answer parsing, the demo decider
+    graphPrompt.ts      prompt the graph: the generator's prompt, validation, repair, edit ids
   components/           TopBar · Inspector · NodeInspector · GraphCanvas · AgentNode · FlowNodes ·
-                        MessageEdge · TranscriptPanel · MemoryPanel · BlockLibrary · GateDialog · RunBar
+                        MessageEdge · TranscriptPanel · MemoryPanel · BlockLibrary · GateDialog · RunBar ·
+                        GraphPromptDialog
 ```
 
 ## Stack

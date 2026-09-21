@@ -117,6 +117,7 @@ export type Predicate =
   | { op: 'matches'; pattern: string; flags?: string }        // RegExp, pattern ≤ 200 chars
   | { op: 'json'; path: string; cmp: Cmp; value?: string | number | boolean }
   | { op: 'memory'; memory: string; key: string; cmp: Cmp; value?: string | number | boolean }
+  | { op: 'decision'; path: string; cmp: Cmp; value?: string | number | boolean }  // §3.9
   | { op: 'visits'; cmp: 'lt' | 'lte' | 'gt' | 'gte' | 'eq'; value: number }
   | { op: 'round'; cmp: 'lt' | 'lte' | 'gt' | 'gte' | 'eq'; value: number }
   | { op: 'all' | 'any'; of: Predicate[] }
@@ -129,6 +130,8 @@ type Cmp = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'contains'
   dotted `path` (`verdict.score`). No JSON, or no such path: the comparison is false, never a throw.
 - `memory` reads a key of a Memory node by name, so a route can depend on shared state
   (`status == "approved"`) and not only on the last message.
+- `decision` reads the typed answers a Decision node attached to the message (`route.choice`,
+  `route.confidence`, `urgent.yes`): routing on a decision model's verdict and on how sure it was.
 - `visits` counts how many times the link (on a guard) or the node (on a Condition) has fired in this
   run. It is how a critic loop says "at most three drafts" in the graph instead of in a prompt.
 - A bad regex, a bad path, an unknown `op`: evaluates to `false` and reports one notice. A condition
@@ -310,14 +313,85 @@ onBranch?:      (e: { path: string[]; nodeId: string; taken: string[]; skipped: 
 Every existing callback gains an optional `path` (absent = top level). The rule of the current
 engine holds: **the UI draws exactly what the engine reported**, never a guess.
 
+### 3.9 Decision nodes — System 1 → System 2
+
+Added in the ninth pass. Some models do not write text at all. TypeSafe's **Jev**, the first of what
+TypeSafe calls *System One* models, answers typed questions about a `state`: a `choice` among
+labels, a `noul` (the probability of yes), a `score` on an ordered rubric. Each answer comes back
+with probabilities and a confidence, in one cheap call. That is exactly what a router needs, and
+exactly what an LLM is bad at being: an LLM asked for a label writes one, with no honest idea of how
+sure it is.
+
+A **Decision** node (`kind: "decision"`, [`src/engine/decisions.ts`](../src/engine/decisions.ts)) is
+that call, placed in the graph:
+
+- **It takes a turn, like an agent or a block.** It costs a request and some latency, so it is
+  scheduled in the round rather than resolved inline like a Condition (`TURN_KINDS` in `graph.ts`).
+  It can receive the task (it is often the entry point).
+- **State in, answers out.** Whatever reached it is the `state`. Its questions are configured in the
+  inspector (name, type, instructions, labels with criteria or levels) and sent all at once.
+- **It generates no text.** The transcript shows its answers (and a `decision` chip); the canvas
+  node shows the chosen answer and a probability bar per option. What it forwards is the message it
+  judged, followed by one line of verdict, so the agent it escalates to reads both.
+- **Answers travel with the message.** They ride on the delivery, through zero-token nodes too, so a
+  guard on its outgoing links — or on a Condition two hops down — reads them with the `decision`
+  predicate. The next agent's turn is a new message and carries none.
+- **Routing.** A Decision node sends its message along every outgoing link whose guard holds. A link
+  marked `isDefault` is the else branch, taken only when no other link is. The *Triage* preset is
+  the whole pattern: three desks, each behind `route.choice = X and route.confidence ≥ 0.6`, and a
+  default link to a senior LLM agent. When the decision model is sure, a specialist answers; when it
+  hesitates, the expensive model reads the whole thing. System 1, then System 2 only when needed.
+- **Strict parsing.** An answer without a usable choice (absent, not one of the labels, no
+  confidence) fails the run with a sentence naming the question. It is never replaced by a default:
+  a silent 0.5 would route a message as if the model had been unsure when it had said nothing.
+- **Providers.** `openrouter` calls `https://openrouter.ai/api/alpha/decisions` with the OpenRouter
+  key already entered for chat (its CORS policy allows any origin: checked with a preflight from the
+  Pages origin, and with a real call). `typesafe` calls TypeSafe's own `/v1/systemone` with a
+  TypeSafe key, same request shape — but that API refuses browser origins, so from the published
+  site it needs a relay of your own in its endpoint field, like any gateway that does not allow the
+  page. `mock` is the demo decider: it weighs each option by the words it shares with the message,
+  deterministic and labelled demo, so the preset runs with no key. The model field is free text, so a
+  new decision model is a new string, not new code.
+- **Callback.** `onDecision({ path, nodeId, answers })`, which the store keeps per node for the bars.
+
+### 3.10 Prompting the graph
+
+The graph is JSON in a documented format, which is exactly what a model writes well. **Prompt the
+graph** (a button in the top bar, on every layout) turns a description into a swarm, or applies a
+described change to the current one. [`src/engine/graphPrompt.ts`](../src/engine/graphPrompt.ts):
+
+1. **The model gets the real format.** The system prompt is built from the same lists the reader
+   checks against (providers, node kinds, predicate ops, question types): a compile-time check fails
+   when a node kind or a predicate op exists in `types.ts` but not in the generator's list. Two
+   presets, serialised by the exporter itself, are the examples.
+2. **The answer goes through the existing reader**, then through an audit of what the reader had to
+   drop. The reader is right to be forgiving with a paste; a generated graph that silently lost a
+   guard is a different graph (an unguarded link). So a dropped node, link, guard, predicate or
+   question is an error.
+3. **One repair.** The first error goes back to the model with its answer, once. After that a
+   person reads the error, and the canvas has not been touched.
+4. **Edit keeps ids by construction.** A model that re-keyed an existing node (same kind, same name,
+   new id) gets its id put back everywhere; a position it left out is restored. A node it removed is
+   gone, which is what "remove the critic" means.
+5. **One undo step.** Loading is `replaceSwarm`, which pushes the previous swarm on the history.
+6. **Nothing secret goes in or comes out.** The current graph is sent through the exporter, which has
+   no field for keys or endpoints; the answer is also checked against the keys and endpoint URLs this
+   browser holds.
+
+With no key, a **demo generator** picks the preset whose theme matches the words (or makes one fixed
+kind of edit), streams it like a real answer, and says it is a demo.
+
 ## 4. Interface
 
-- **Node palette** (left rail, and a `+` menu on mobile): Agent, Condition, Join, Output, Human gate,
-  Memory, Block (opens the library).
+- **Node palette** (left rail, and a `+` menu on mobile): Agent, Decision, Condition, Join, Output,
+  Human gate, Memory, Block (opens the library).
+- **Prompt the graph**: a button in the top bar (an icon on a phone) opens the generator (§3.10).
 - **Shapes.** Agent: the current card. Condition: a diamond with `true`/`false` handles. Join: a
   narrow bar. Output: a flag. Human gate: a hand. Memory: a cylinder showing its entry count, which
   flashes in the writer's colour on each write. Block: a stacked card with a mini progress line
-  (inner round, inner agents as dots) while it runs. Ephemeral nodes: dashed outline, fade in.
+  (inner round, inner agents as dots) while it runs. Decision: a card with a coloured edge listing its
+  questions, and after a call the chosen answer with a probability bar per option. Ephemeral nodes:
+  dashed outline, fade in.
 - **Edges.** Labels are visible. A guarded edge shows a small filter icon; hovering it shows the
   predicate in words (`if message contains "guilty"`). Access links are dashed and never animate a
   message packet; a read pulses toward the agent, a write toward the memory. After a branch
