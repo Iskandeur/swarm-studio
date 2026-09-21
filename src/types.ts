@@ -7,6 +7,15 @@
 
 export type ProviderId = 'mock' | 'openai' | 'anthropic' | 'openrouter' | 'custom'
 
+/**
+ * Where a Decision node sends its typed questions. Not a chat provider: these models answer
+ * `choice` / `noul` / `score` questions about a state and never write text (docs/graph-engineering.md §Decision).
+ */
+export type DecisionProviderId = 'mock' | 'openrouter' | 'typesafe'
+
+/** Every key slot this browser keeps. TypeSafe's own key is the one slot no chat provider uses. */
+export type KeyId = ProviderId | 'typesafe'
+
 /** How a speaking turn is handed to the agents an agent points at. */
 export type Topology =
   /** Every outgoing link carries the message. The swarm widens each round. */
@@ -59,6 +68,8 @@ export type Predicate =
   | { op: 'matches'; pattern: string; flags?: string }
   | { op: 'json'; path: string; cmp: Comparison; value?: string | number | boolean }
   | { op: 'memory'; memory: string; key: string; cmp: Comparison; value?: string | number | boolean }
+  /** Reads the typed answers a Decision node attached to the message: `route.choice`, `route.confidence`, `urgent.noul`. */
+  | { op: 'decision'; path: string; cmp: Comparison; value?: string | number | boolean }
   | { op: 'visits'; cmp: CountComparison; value: number }
   | { op: 'round'; cmp: CountComparison; value: number }
   | { op: 'all'; of: Predicate[] }
@@ -148,7 +159,45 @@ export interface BlockNode extends NodeBase {
   overrides?: { provider?: ProviderId; model?: string }
 }
 
-export type FlowNode = ConditionNode | JoinNode | OutputNode | HumanNode | MemoryNode | BlockNode
+/**
+ * A typed question for a decision model.
+ *  · `choice`: one label out of `options` (label → what it means). Answer: choice, confidence, probabilities.
+ *  · `noul`: yes or no. `options` may describe `true` and `false`. Answer: the probability of yes.
+ *  · `score`: a level on an ordered rubric, `levels[0]` lowest. Answer: expected score, confidence, probabilities.
+ */
+export type DecisionQuestionType = 'choice' | 'noul' | 'score'
+
+export interface DecisionQuestion {
+  /** The key the answer comes back under, and what a guard names: `route` in `route.choice`. */
+  name: string
+  type: DecisionQuestionType
+  instructions: string
+  /** `choice`: label → criterion. `noul`: optional `true` / `false` descriptions. Unused by `score`. */
+  options?: Array<{ label: string; criterion: string }>
+  /** `score` only: at least two level descriptions, lowest first. */
+  levels?: string[]
+}
+
+/** One typed answer, as the engine hands it to guards. Numbers are 0..1 except a score. */
+export type DecisionAnswer =
+  | { type: 'choice'; choice: string; confidence: number; probabilities: Record<string, number> }
+  | { type: 'noul'; noul: number; yes: boolean }
+  | { type: 'score'; score: number; confidence: number; probabilities: Record<string, number>; level: string }
+
+export type DecisionAnswers = Record<string, DecisionAnswer>
+
+/**
+ * Zero generated text: asks a decision model typed questions about what reached it, and publishes the
+ * typed answers so link guards and conditions can route on them (the System 1 half of System 1 / System 2).
+ */
+export interface DecisionNode extends NodeBase {
+  kind: 'decision'
+  provider: DecisionProviderId
+  model: string
+  questions: DecisionQuestion[]
+}
+
+export type FlowNode = ConditionNode | JoinNode | OutputNode | HumanNode | MemoryNode | BlockNode | DecisionNode
 export type FlowNodeKind = FlowNode['kind']
 
 export interface Graph {
@@ -218,6 +267,8 @@ export interface TranscriptEntry {
   /** Hue of the speaker, for the same reason. */
   hue?: number
   actions?: ActionChip[]
+  /** Set on a Decision node's entry: the typed answers, which the text only summarises. */
+  decision?: DecisionAnswers
 }
 
 export type RunPhase = 'idle' | 'running' | 'paused' | 'done' | 'error' | 'stopped'

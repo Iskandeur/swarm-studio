@@ -43,6 +43,7 @@ const OPERATORS: Array<{ op: Op; label: string }> = [
   { op: 'matches', label: 'Message matches (regex)' },
   { op: 'json', label: 'JSON field' },
   { op: 'memory', label: 'Memory value' },
+  { op: 'decision', label: 'Decision answer' },
   { op: 'visits', label: 'Times this has fired' },
   { op: 'round', label: 'Round number' },
   { op: 'all', label: 'All of' },
@@ -82,7 +83,7 @@ const INDENT: SxProps<Theme> = { pl: 1.5, borderLeft: '2px solid', borderColor: 
  * pattern that does not compile, a repetition of a repetition, an empty path segment, a memory with
  * no name. Those are what the person has to fix before the run, so those are what the form shows.
  */
-const EMPTY_CONTEXT: PredicateContext = { text: '', visits: 0, round: 1, readMemory: () => undefined }
+const EMPTY_CONTEXT: PredicateContext = { text: '', visits: 0, round: 1, readMemory: () => undefined, decision: {} }
 
 function shapeProblem(predicate: Predicate | undefined): string | undefined {
   return evaluate(predicate, EMPTY_CONTEXT).problem
@@ -133,11 +134,11 @@ function keepFlags(input: string): string {
  * the usual reason to pick "All of" is "this, and also something else". Moving between group kinds
  * keeps the children.
  */
-function convert(current: Predicate | undefined, op: Op, memoryNames: string[]): Predicate {
+function convert(current: Predicate | undefined, op: Op, memoryNames: string[], decisionPaths: string[]): Predicate {
   const p = isKnown(current) ? current : undefined
   const carriedText = p?.op === 'contains' ? text(p.value) : p?.op === 'matches' ? text(p.pattern) : ''
   const comparison =
-    p?.op === 'json' || p?.op === 'memory'
+    p?.op === 'json' || p?.op === 'memory' || p?.op === 'decision'
       ? { cmp: p.cmp, ...(p.value !== undefined ? { value: p.value } : {}) }
       : { cmp: 'eq' as Comparison, value: '' }
   const count = p?.op === 'visits' || p?.op === 'round' ? { cmp: p.cmp, value: p.value } : undefined
@@ -163,6 +164,8 @@ function convert(current: Predicate | undefined, op: Op, memoryNames: string[]):
       return { op, path: '', ...comparison }
     case 'memory':
       return { op, memory: memoryNames[0] ?? '', key: '', ...comparison }
+    case 'decision':
+      return { op, path: decisionPaths[0] ?? '', ...comparison }
     // A critic loop's "fewer than three drafts", and a short run, are the likeliest first intents.
     case 'visits':
       return { op, ...(count ?? { cmp: 'lt' as CountComparison, value: 3 }) }
@@ -181,17 +184,27 @@ export function PredicateEditor({
   value,
   onChange,
   memoryNames,
+  decisionPaths = [],
   allowNone = false,
 }: {
   value: Predicate | undefined
   onChange: (next: Predicate | undefined) => void
   memoryNames: string[]
+  /** Answer paths of the Decision nodes on this graph (`route.choice`), offered for a decision condition. */
+  decisionPaths?: string[]
   allowNone?: boolean
 }): JSX.Element {
   const problem = shapeProblem(value)
   return (
     <Stack spacing={1}>
-      <PredicateFields value={value} onChange={onChange} memoryNames={memoryNames} allowNone={allowNone} path={[]} />
+      <PredicateFields
+        value={value}
+        onChange={onChange}
+        memoryNames={memoryNames}
+        decisionPaths={decisionPaths}
+        allowNone={allowNone}
+        path={[]}
+      />
       {/* One text node on purpose: it is read aloud as it changes, and a split sentence reads as two. */}
       <Typography variant="caption" role="status" sx={{ display: 'block', opacity: 0.75, fontStyle: 'italic' }}>
         {`In words: ${describePredicate(value)}`}
@@ -209,13 +222,14 @@ interface FieldsProps {
   value: Predicate | undefined
   onChange: (next: Predicate | undefined) => void
   memoryNames: string[]
+  decisionPaths: string[]
   /** Only the root of a link guard may be "no condition"; a child of a group always is one. */
   allowNone: boolean
   /** 1-based position from the root: `[]` is the root, `[2, 1]` the first child of its second child. */
   path: number[]
 }
 
-function PredicateFields({ value, onChange, memoryNames, allowNone, path }: FieldsProps) {
+function PredicateFields({ value, onChange, memoryNames, decisionPaths, allowNone, path }: FieldsProps) {
   const name = path.length === 0 ? 'Condition' : `Condition ${path.join('.')}`
   // `evaluate` counts the root as depth 1 and refuses anything nested past MAX_PREDICATE_DEPTH, so a
   // group is only offered where its children would still be read.
@@ -226,7 +240,7 @@ function PredicateFields({ value, onChange, memoryNames, allowNone, path }: Fiel
 
   const choose = (op: Op) => {
     if (op === 'always' && allowNone) onChange(undefined)
-    else onChange(convert(value, op, memoryNames))
+    else onChange(convert(value, op, memoryNames, decisionPaths))
   }
 
   const fields = (
@@ -239,7 +253,7 @@ function PredicateFields({ value, onChange, memoryNames, allowNone, path }: Fiel
         ))}
       </TextField>
       {value !== undefined && isKnown(value) && (
-        <OperatorFields value={value} onChange={onChange} memoryNames={memoryNames} path={path} />
+        <OperatorFields value={value} onChange={onChange} memoryNames={memoryNames} decisionPaths={decisionPaths} path={path} />
       )}
     </Stack>
   )
@@ -257,11 +271,13 @@ function OperatorFields({
   value,
   onChange,
   memoryNames,
+  decisionPaths,
   path,
 }: {
   value: Predicate
   onChange: (next: Predicate) => void
   memoryNames: string[]
+  decisionPaths: string[]
   path: number[]
 }) {
   // A group's problem belongs to one of its children, which marks its own field.
@@ -399,6 +415,43 @@ function OperatorFields({
       )
     }
 
+    case 'decision': {
+      const typed = text(value.path).trim()
+      return (
+        <Stack spacing={1.25}>
+          <Autocomplete
+            freeSolo
+            size="small"
+            options={decisionPaths}
+            value={text(value.path)}
+            onInputChange={(_, next) => {
+              if (next !== value.path) onChange({ ...value, path: next })
+            }}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Answer"
+                placeholder="route.choice"
+                error={invalid}
+                helperText={
+                  decisionPaths.length === 0
+                    ? 'No Decision node in this graph yet'
+                    : typed && !decisionPaths.includes(typed) && !typed.includes('.probabilities.')
+                      ? 'Not an answer of any Decision node here: it will read as missing'
+                      : 'question.choice / .confidence (choice) · .yes / .noul (yes-no) · .score / .level (score)'
+                }
+              />
+            )}
+          />
+          <ComparisonRow
+            cmp={value.cmp}
+            value={value.value}
+            onChange={(next) => onChange({ op: 'decision', path: value.path, ...next })}
+          />
+        </Stack>
+      )
+    }
+
     case 'visits':
     case 'round': {
       const current = value
@@ -456,6 +509,7 @@ function OperatorFields({
                     value={child}
                     onChange={(next) => replace(index, next)}
                     memoryNames={memoryNames}
+                    decisionPaths={decisionPaths}
                     allowNone={false}
                     path={childPath}
                   />
@@ -499,6 +553,7 @@ function OperatorFields({
             value={negation.of}
             onChange={(next) => onChange({ op: 'not', of: next ?? blank() })}
             memoryNames={memoryNames}
+            decisionPaths={decisionPaths}
             allowNone={false}
             path={[...path, 1]}
           />

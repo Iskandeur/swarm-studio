@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Alert, Box, Button, IconButton, Paper, Stack, Tooltip, Typography } from '@mui/material'
 import SmartToyRoundedIcon from '@mui/icons-material/SmartToyRounded'
 import AltRouteRoundedIcon from '@mui/icons-material/AltRouteRounded'
+import RuleRoundedIcon from '@mui/icons-material/RuleRounded'
 import MergeTypeRoundedIcon from '@mui/icons-material/MergeTypeRounded'
 import FlagRoundedIcon from '@mui/icons-material/FlagRounded'
 import PanToolRoundedIcon from '@mui/icons-material/PanToolRounded'
@@ -36,6 +37,13 @@ const ITEMS: Item[] = [
     aria: 'Add a condition',
     hint: 'Sends a message down its true or its false link. Costs no tokens.',
     icon: <AltRouteRoundedIcon fontSize="small" />,
+  },
+  {
+    id: 'decision',
+    label: 'Decision',
+    aria: 'Add a decision',
+    hint: 'A typed decision model (Jev): answers choice, yes/no and score questions, and links route on the answers.',
+    icon: <RuleRoundedIcon fontSize="small" />,
   },
   {
     id: 'join',

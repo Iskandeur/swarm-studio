@@ -22,6 +22,9 @@ import type {
   Agent,
   BlockDef,
   BlockNode,
+  DecisionProviderId,
+  DecisionQuestion,
+  DecisionQuestionType,
   Dispatch,
   FlowNode,
   Graph,
@@ -34,6 +37,7 @@ import type {
 } from '../types.ts'
 import { DEFAULT_MEMORY_CHARS } from '../types.ts'
 import { readPredicate } from './predicates.ts'
+import { DECISION_PROVIDER_IDS, DECISION_TYPES, decisionProviderInfo } from './decisions.ts'
 
 export const PORTABLE_VERSION = 2
 const TOPOLOGIES: Topology[] = ['broadcast', 'round-robin', 'manager']
@@ -45,6 +49,9 @@ const HUES = [262, 168, 4, 32, 210, 300, 132, 48]
 /** A pasted document is welcome as a knowledge base, a pasted novel per entry is not. */
 const MAX_SEED_VALUE = 50_000
 const MAX_SEED_ENTRIES = 500
+/** A decision call asks everything at once; past a few dozen questions it is a mistake, not a design. */
+const MAX_QUESTIONS = 32
+const MAX_OPTIONS = 64
 
 export interface PortableSwarm {
   format: 'swarm-studio'
@@ -182,6 +189,51 @@ function readSeed(raw: unknown): MemoryEntry[] {
   return entries
 }
 
+/**
+ * A Decision node's questions. Forgiving like the rest of the reader: the API's own shape, where
+ * `criteria` is an object of label → description (or, for a score, a list of levels), is accepted
+ * as well as ours, so a request copied from TypeSafe's docs pastes as-is. A question that cannot be
+ * read is dropped; the inspector then says the node needs one.
+ */
+function readQuestions(raw: unknown): DecisionQuestion[] {
+  const entries: Array<[string | undefined, unknown]> = Array.isArray(raw)
+    ? raw.map((q) => [undefined, q])
+    : raw && typeof raw === 'object'
+      ? Object.entries(raw as Record<string, unknown>)
+      : []
+  const questions: DecisionQuestion[] = []
+  for (const [key, item] of entries.slice(0, MAX_QUESTIONS)) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    const name = (asString(record.name) || key || '').trim()
+    const type = DECISION_TYPES.includes(record.type as DecisionQuestionType) ? (record.type as DecisionQuestionType) : undefined
+    if (!name || !type) continue
+    const question: DecisionQuestion = { name, type, instructions: asString(record.instructions).slice(0, MAX_SEED_VALUE) }
+    const criteria = record.criteria
+    if (type === 'score') {
+      const source = Array.isArray(record.levels) ? record.levels : Array.isArray(criteria) ? criteria : []
+      question.levels = source.map((l) => (typeof l === 'string' ? l : l == null ? '' : JSON.stringify(l))).slice(0, MAX_OPTIONS)
+    } else {
+      let options: Array<{ label: string; criterion: string }> = []
+      if (Array.isArray(record.options)) {
+        options = record.options
+          .filter((o): o is Record<string, unknown> => Boolean(o) && typeof o === 'object')
+          .map((o) => ({ label: asString(o.label).trim(), criterion: asString(o.criterion) }))
+      } else if (criteria && typeof criteria === 'object' && !Array.isArray(criteria)) {
+        options = Object.entries(criteria as Record<string, unknown>).map(([label, c]) => ({
+          label: label.trim(),
+          criterion: typeof c === 'string' ? c : c == null ? '' : JSON.stringify(c),
+        }))
+      }
+      options = options.filter((o) => o.label).slice(0, MAX_OPTIONS)
+      if (type === 'noul') options = options.filter((o) => o.label === 'true' || o.label === 'false')
+      if (options.length > 0 || type === 'choice') question.options = options
+    }
+    questions.push(question)
+  }
+  return questions
+}
+
 function readFlowNode(raw: unknown, index: number): FlowNode | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const record = raw as Record<string, unknown>
@@ -218,6 +270,20 @@ function readFlowNode(raw: unknown, index: number): FlowNode | undefined {
         wakeReaders: record.wakeReaders === true,
         seed: readSeed(record.seed),
         maxChars: chars !== undefined && chars >= 200 ? Math.min(40_000, Math.floor(chars)) : DEFAULT_MEMORY_CHARS,
+      }
+    }
+    case 'decision': {
+      const provider = DECISION_PROVIDER_IDS.includes(record.provider as DecisionProviderId)
+        ? (record.provider as DecisionProviderId)
+        : 'mock'
+      return {
+        id,
+        kind,
+        name: named('Decision'),
+        position,
+        provider,
+        model: asString(record.model) || decisionProviderInfo(provider).models[0],
+        questions: readQuestions(record.questions),
       }
     }
     case 'block': {

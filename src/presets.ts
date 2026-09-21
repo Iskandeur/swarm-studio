@@ -306,6 +306,130 @@ export const PRESETS: SwarmSpec[] = [
     links: [{ id: 'r1', source: 'why', target: 'excuse' }],
     blocks: BUILTIN_BLOCKS.filter((b) => b.id === 'builtin-recursive-solver'),
   },
+  /**
+   * System 1 → System 2. A decision model (TypeSafe's Jev, or the demo decider) routes the message in
+   * one cheap typed call; a specialist gets it only when the model is sure. When it is not, nothing
+   * matches and the default link escalates to an LLM that reads the whole thing. The demo message is
+   * about a charge AND a crash, so the demo decider hesitates and the escalation is what you see.
+   */
+  {
+    name: 'Triage (System 1 → System 2)',
+    task: 'Hi. My invoice shows two charges this month, and now the app crashes when I open billing. What is going on?',
+    topology: 'broadcast',
+    maxRounds: 4,
+    entryIds: ['triage'],
+    agents: [
+      {
+        id: 'billing',
+        name: 'Billing Desk',
+        ...mock,
+        systemPrompt: 'You handle payments, invoices and refunds. Answer the customer in two plain sentences and name the one thing you will do.',
+        hue: 132,
+        position: { x: 360, y: -120 },
+      },
+      {
+        id: 'tech',
+        name: 'Tech Desk',
+        ...mock,
+        systemPrompt: 'You handle bugs and crashes. Ask for the one detail you need, or give the one fix that works. Two sentences.',
+        hue: 210,
+        position: { x: 360, y: 60 },
+      },
+      {
+        id: 'account',
+        name: 'Account Desk',
+        ...mock,
+        systemPrompt: 'You handle logins, passwords and profiles. Two sentences, no jargon.',
+        hue: 300,
+        position: { x: 360, y: 240 },
+      },
+      {
+        id: 'senior',
+        name: 'Senior Agent (System 2)',
+        ...mock,
+        model: 'demo-verbose',
+        systemPrompt:
+          'The triage model was not sure where this message belongs, which is why it reached you. Read it whole, untangle every issue it raises, and answer each one in order, briefly.',
+        hue: 32,
+        position: { x: 360, y: 440 },
+      },
+    ],
+    nodes: [
+      {
+        id: 'triage',
+        kind: 'decision',
+        name: 'Triage',
+        provider: 'mock',
+        model: 'demo-decider',
+        position: { x: 0, y: 140 },
+        questions: [
+          {
+            name: 'route',
+            type: 'choice',
+            instructions: 'Which desk should answer this support message?',
+            options: [
+              { label: 'billing', criterion: 'payments, invoices, charges, refunds' },
+              { label: 'technical', criterion: 'bugs, crashes, errors, the app not working' },
+              { label: 'account', criterion: 'login, password, profile, account access' },
+            ],
+          },
+          {
+            name: 'blocked',
+            type: 'noul',
+            instructions: 'Is the customer unable to use the product right now?',
+            options: [{ label: 'true', criterion: 'the app crashes, will not open, or access is lost' }],
+          },
+        ],
+      },
+      { id: 'reply', kind: 'output', name: 'Reply to customer', position: { x: 760, y: 170 } },
+    ],
+    links: [
+      {
+        id: 'd1',
+        source: 'triage',
+        target: 'billing',
+        label: 'billing',
+        guard: {
+          op: 'all',
+          of: [
+            { op: 'decision', path: 'route.choice', cmp: 'eq', value: 'billing' },
+            { op: 'decision', path: 'route.confidence', cmp: 'gte', value: 0.6 },
+          ],
+        },
+      },
+      {
+        id: 'd2',
+        source: 'triage',
+        target: 'tech',
+        label: 'technical',
+        guard: {
+          op: 'all',
+          of: [
+            { op: 'decision', path: 'route.choice', cmp: 'eq', value: 'technical' },
+            { op: 'decision', path: 'route.confidence', cmp: 'gte', value: 0.6 },
+          ],
+        },
+      },
+      {
+        id: 'd3',
+        source: 'triage',
+        target: 'account',
+        label: 'account',
+        guard: {
+          op: 'all',
+          of: [
+            { op: 'decision', path: 'route.choice', cmp: 'eq', value: 'account' },
+            { op: 'decision', path: 'route.confidence', cmp: 'gte', value: 0.6 },
+          ],
+        },
+      },
+      { id: 'd4', source: 'triage', target: 'senior', label: 'escalate', isDefault: true },
+      { id: 'o1', source: 'billing', target: 'reply' },
+      { id: 'o2', source: 'tech', target: 'reply' },
+      { id: 'o3', source: 'account', target: 'reply' },
+      { id: 'o4', source: 'senior', target: 'reply' },
+    ],
+  },
 ]
 
 export const DEFAULT_SPEC = PRESETS[0]

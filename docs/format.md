@@ -118,7 +118,7 @@ links. A version-1 export is simply a version-2 swarm that uses none of them.
 | `maxSpawns` | Helpers agents may create in one run. Default 12, at most 100. |
 | `agents[].dispatch` | `inherit` (the topology decides), `all`, `rotate`, or `choose` (the agent names a labelled link with `<route to="…"/>`). |
 | `agents[].canSpawn` | May create helpers with `<spawn>`. |
-| `nodes[].kind` | `condition`, `join`, `output`, `human`, `memory` or `block`. |
+| `nodes[].kind` | `condition`, `join`, `output`, `human`, `memory`, `block` or `decision`. |
 | `links[].kind` | `message` (default) or `access`. An access link joins exactly one memory and one agent: agent → memory writes, memory → agent reads, `access: "readwrite"` both. |
 | `links[].label` | A branch name. `true`/`false` out of a condition, `approved`/`rejected` out of a human gate, anything for a `choose` agent. |
 | `links[].guard` | A predicate (below). The link carries a message only when it holds. |
@@ -137,6 +137,7 @@ evaluated as code.
 | `matches` | `pattern`, `flags?` (`i m s u`) | the message matches. Patterns over 200 characters, or that repeat a repetition like `(a+)+`, are refused: they can freeze a page. |
 | `json` | `path`, `cmp`, `value?` | the first JSON object in the message has `path` (dotted, numbers index arrays) comparing true |
 | `memory` | `memory`, `key`, `cmp`, `value?` | the named memory's current value for `key` compares true |
+| `decision` | `path`, `cmp`, `value?` | the typed answer a Decision node attached to the message, at `path` (`route.choice`, `route.confidence`, `urgent.yes`), compares true. False, with a notice, when no Decision node answered upstream. |
 | `visits` | `cmp`, `value` | this link (or condition node) has fired that many times before |
 | `round` | `cmp`, `value` | the round number compares true |
 | `all` / `any` | `of: [...]` | every / any child holds |
@@ -148,4 +149,49 @@ are numeric; anything malformed evaluates to false and says why.
 Also dropped on the way in, in version 2: an access link that does not join one memory and one
 agent, a message link that touches a memory, a node whose id is already an agent's, a block node
 without a `blockId`, a node of unknown kind.
+
+### Decision nodes
+
+A `decision` node asks a decision model (a "System One" model: TypeSafe's Jev is the first) typed
+questions about what reaches it. It writes no text. It forwards the message it judged, with its
+answers attached, and the guards on its outgoing links read them with the `decision` predicate.
+
+```json
+{
+  "id": "triage", "kind": "decision", "name": "Triage", "position": { "x": 0, "y": 140 },
+  "provider": "openrouter", "model": "typesafe/jev-1.13",
+  "questions": [
+    { "name": "route", "type": "choice", "instructions": "Which desk should answer?",
+      "options": [{ "label": "billing", "criterion": "payments, invoices, refunds" },
+                  { "label": "technical", "criterion": "bugs, crashes, errors" }] },
+    { "name": "blocked", "type": "noul", "instructions": "Is the customer unable to use the product?",
+      "options": [{ "label": "true", "criterion": "the app crashes or access is lost" }] },
+    { "name": "anger", "type": "score", "instructions": "How upset is the customer?",
+      "levels": ["calm", "annoyed", "furious"] }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `provider` | `mock` (the demo decider, no key), `openrouter` (OpenRouter's `/api/alpha/decisions`, with the OpenRouter key) or `typesafe` (TypeSafe's own `/v1/systemone`, with a TypeSafe key). |
+| `model` | Free text. `typesafe/jev-1.13` on OpenRouter, `jev-latest` on TypeSafe. |
+| `questions[].name` | One word; the key its answer comes back under, and the first segment of a guard path. |
+| `questions[].type` | `choice`: pick one of `options` (≥ 2). `noul`: yes or no; `options` may describe `true` and `false`. `score`: a level on `levels` (≥ 2, lowest first). |
+
+What a guard can read, per type:
+
+| Type | Answer fields |
+| --- | --- |
+| `choice` | `choice` (a label), `confidence` (0–1), `probabilities.<label>` |
+| `noul` | `noul` (probability of yes, 0–1), `yes` (`noul` ≥ 0.5) |
+| `score` | `score` (the expected level, may be fractional), `level` (its name), `confidence`, `probabilities.<n>` |
+
+A link out of a decision with `"isDefault": true` is the else branch: it is taken only when no other
+link of that node is. That is the System 1 → System 2 pattern in one link: route when the decision
+model is sure, escalate to an LLM agent when it is not (see the *Triage* preset).
+
+The reader also accepts the API's own question shape, so a request copied from TypeSafe's docs pastes
+as is: `questions` as an object keyed by name, with `criteria` as `{label: description}` (choice,
+noul) or a list of levels (score).
 

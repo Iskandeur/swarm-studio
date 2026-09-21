@@ -27,6 +27,7 @@ import MoreVertRoundedIcon from '@mui/icons-material/MoreVertRounded'
 import UndoRoundedIcon from '@mui/icons-material/UndoRounded'
 import RedoRoundedIcon from '@mui/icons-material/RedoRounded'
 import KeyboardRoundedIcon from '@mui/icons-material/KeyboardRounded'
+import AutoFixHighRoundedIcon from '@mui/icons-material/AutoFixHighRounded'
 import { useStore } from '../store'
 import { PRESETS } from '../presets'
 import { exportSwarm } from '../engine/portable'
@@ -40,16 +41,19 @@ const PRESET_HINTS: Record<string, string> = {
   'The Fridge Tribunal': 'shared memory, a join, a condition, a human gate',
   'The Delegation Spiral': 'agents spawning agents, down to the depth limit',
   'The Recursive Excuse': 'a block that contains itself',
+  'Triage (System 1 → System 2)': 'a decision model routes; unsure answers escalate to an LLM',
 }
 
 export function TopBar({
   onOpenSettings,
   onOpenHelp,
   onOpenShare,
+  onOpenPrompt,
 }: {
   onOpenSettings: () => void
   onOpenHelp: () => void
   onOpenShare: () => void
+  onOpenPrompt: () => void
 }) {
   const theme = useTheme()
   const compact = useMediaQuery(theme.breakpoints.down('md'))
@@ -117,6 +121,25 @@ export function TopBar({
             </MenuItem>
           ))}
         </Menu>
+
+        {/* The one feature that replaces clicking: kept in the bar on every layout, never in a menu. */}
+        {compact ? (
+          <Tooltip title="Prompt the graph: describe the swarm you want">
+            <IconButton onClick={onOpenPrompt} aria-label="Prompt the graph" color="primary">
+              <AutoFixHighRoundedIcon />
+            </IconButton>
+          </Tooltip>
+        ) : (
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<AutoFixHighRoundedIcon />}
+            onClick={onOpenPrompt}
+            sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+          >
+            Prompt the graph
+          </Button>
+        )}
 
         <Box sx={{ flex: 1 }} />
 

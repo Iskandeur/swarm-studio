@@ -23,6 +23,8 @@ import type {
   AgentStatus,
   BlockDef,
   BlockNode,
+  DecisionAnswers,
+  DecisionNode,
   FlowNode,
   Graph,
   HumanNode,
@@ -47,6 +49,13 @@ import {
 } from './session.ts'
 import { parseActions, type Action, type SpawnAction, type WriteAction } from './actions.ts'
 import { evaluate } from './predicates.ts'
+import {
+  callDecision,
+  decisionKey,
+  resolveDecisionEndpoint,
+  summarizeDecision,
+  type DecisionEndpoints,
+} from './decisions.ts'
 import { applyWrite, createMemoryState, readValue, renderMemory, type MemoryState } from './memory.ts'
 import {
   canWrite,
@@ -57,6 +66,7 @@ import {
   normalizeSpec,
   readableMemories,
   resolveEntryIds as resolveGraphEntryIds,
+  TURN_KINDS,
   writableMemories,
 } from './graph.ts'
 
@@ -135,6 +145,8 @@ export interface RunnerCallbacks {
   onGateClosed?: (event: { id: string; decision: GateDecision | null }) => void
   /** A decision about which links a message took, and which it did not. */
   onBranch?: (event: BranchEvent) => void
+  /** A Decision node answered: its typed answers, for the node's bars on the canvas. */
+  onDecision?: (event: { path: string[]; nodeId: string; answers: DecisionAnswers }) => void
   /** A zero-token node did its work (for a flash on the canvas). */
   onNodeFired?: (event: { path: string[]; nodeId: string; kind: FlowNode['kind'] }) => void
 }
@@ -159,6 +171,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export interface RunOptions {
   endpoints?: Endpoints
+  /** Endpoint overrides for Decision nodes (a relay for TypeSafe's own API, say). */
+  decisionEndpoints?: DecisionEndpoints
   /** Reuse a session to keep memory and cursors across a continued run. */
   session?: RunSession
   /** Agents that speak first, overriding the spec's entry points (used to continue from one agent). */
@@ -186,6 +200,10 @@ interface Turn {
   entryId: string
   prose: string
   actions: Action[]
+  /** What travels on the links when it is not the prose itself (a Decision node passes the state on). */
+  carry?: string
+  /** Typed answers of a Decision node, attached to what it passes on. */
+  decision?: DecisionAnswers
 }
 
 interface Level {
@@ -211,6 +229,7 @@ interface Ctx {
   spec: SwarmSpec
   keys: ApiKeys
   endpoints: Endpoints
+  decisionEndpoints: DecisionEndpoints
   cb: RunnerCallbacks
   signal: AbortSignal
   inner: AbortController
@@ -236,7 +255,7 @@ export async function runSwarm(
   const spec = normalizeSpec(rawSpec)
   const session = options.session ?? createRunSession()
   const entryIds = resolveEntryIds(spec)
-  const hasSpeaker = spec.agents.length > 0 || nodesOf(spec).some((n) => n.kind === 'block')
+  const hasSpeaker = spec.agents.length > 0 || nodesOf(spec).some((n) => TURN_KINDS.has(n.kind))
   if (!hasSpeaker || entryIds.length === 0) {
     cb.onPhase('error', 'Add at least one agent before running.')
     return
@@ -258,6 +277,7 @@ export async function runSwarm(
     spec,
     keys,
     endpoints: options.endpoints ?? {},
+    decisionEndpoints: options.decisionEndpoints ?? {},
     cb,
     signal,
     inner,
@@ -361,11 +381,19 @@ function agentOf(level: Level, id: string): Agent | undefined {
 
 function isSpeaker(level: Level, id: string): boolean {
   if (agentOf(level, id)) return true
-  return findFlowNode(level.graph, id)?.kind === 'block'
+  const kind = findFlowNode(level.graph, id)?.kind
+  return kind !== undefined && TURN_KINDS.has(kind)
 }
 
 function textOf(items: Delivery[]): string {
   return items.map((d) => d.text).join('\n\n')
+}
+
+/** Every Decision answer the items carry, merged by question name; the later one wins a clash. */
+function decisionOf(items: Delivery[]): DecisionAnswers | undefined {
+  const carried = items.filter((d) => d.decision)
+  if (carried.length === 0) return undefined
+  return Object.assign({}, ...carried.map((d) => d.decision))
 }
 
 function toChatMessage(d: Delivery): ChatMessage {
@@ -451,6 +479,7 @@ async function loop(ctx: Ctx, level: Level, inbox: Map<string, Delivery[]>): Pro
       if (agent) return speak(ctx, level, agent, deliveries, round)
       const node = findFlowNode(level.graph, id)
       if (node?.kind === 'block') return runBlockNode(ctx, level, node, deliveries, round)
+      if (node?.kind === 'decision') return runDecisionNode(ctx, level, node, deliveries, round)
       return null
     })
 
@@ -524,7 +553,9 @@ function deliverInjections(ctx: Ctx, level: Level, inbox: Map<string, Delivery[]
  */
 function route(ctx: Ctx, level: Level, turn: Turn, round: number): { packets: Packet[]; chips: ActionChip[] } {
   const chips: ActionChip[] = []
-  const items: Delivery[] = [{ kind: 'part', author: turn.name, text: turn.prose }]
+  const items: Delivery[] = [
+    { kind: 'part', author: turn.name, text: turn.carry ?? turn.prose, ...(turn.decision ? { decision: turn.decision } : {}) },
+  ]
   // Words are what travel. A turn that only wrote to memory, or only spawned, has nothing to hand on.
   if (turn.prose.trim() === '') return { packets: [], chips }
 
@@ -547,6 +578,9 @@ function route(ctx: Ctx, level: Level, turn: Turn, round: number): { packets: Pa
       return { packets: up.map((l) => packetTo(l.source, items, l, true)), chips }
     }
   }
+
+  // A Decision node routes by its guards alone: rotating its branches would ignore what it decided.
+  if (turn.decision) return { packets: routeDecision(ctx, level, turn, outgoing, items, round), chips }
 
   const effective = dispatch ?? (topology === 'round-robin' ? 'rotate' : 'all')
   let candidates = outgoing
@@ -589,7 +623,7 @@ function route(ctx: Ctx, level: Level, turn: Turn, round: number): { packets: Pa
 }
 
 /** Guards and loop budgets. A link that fails either is skipped, never an error. */
-function filterLinks(ctx: Ctx, level: Level, links: Link[], subject: string, round: number) {
+function filterLinks(ctx: Ctx, level: Level, links: Link[], subject: string, round: number, decision?: DecisionAnswers) {
   const kept: Link[] = []
   const skipped: Link[] = []
   for (const link of links) {
@@ -600,7 +634,7 @@ function filterLinks(ctx: Ctx, level: Level, links: Link[], subject: string, rou
       continue
     }
     if (link.guard) {
-      const result = evaluate(link.guard, { text: subject, visits: used, round, readMemory: readMemoryFor(level) })
+      const result = evaluate(link.guard, { text: subject, visits: used, round, readMemory: readMemoryFor(level), ...(decision ? { decision } : {}) })
       if (result.problem) notice(ctx, level, `guard:${link.id}`, `A link condition could not be read: ${result.problem}`)
       if (!result.value) {
         skipped.push(link)
@@ -661,14 +695,21 @@ async function resolve(
     switch (node.kind) {
       case 'condition': {
         const subject = textOf(packet.items)
-        const result = evaluate(node.predicate, { text: subject, visits, round, readMemory: readMemoryFor(level) })
+        const decision = decisionOf(packet.items)
+        const result = evaluate(node.predicate, {
+          text: subject,
+          visits,
+          round,
+          readMemory: readMemoryFor(level),
+          ...(decision ? { decision } : {}),
+        })
         if (result.problem) notice(ctx, level, `condition:${node.id}`, `Condition "${node.name}" could not be read: ${result.problem}`)
         const branch = result.value ? 'true' : 'false'
         const outgoing = messageLinks(level.graph).filter((l) => l.source === node.id)
         // An unlabelled link out of a condition counts as its "true" side: that is what a single
         // arrow out of a diamond means to anyone reading the canvas.
         const side = outgoing.filter((l) => (l.label?.trim().toLowerCase() || 'true') === branch)
-        const { kept } = filterLinks(ctx, level, side, subject, round)
+        const { kept } = filterLinks(ctx, level, side, subject, round, decision)
         const keptIds = new Set(kept.map((l) => l.id))
         ctx.cb.onBranch?.({
           path: level.path,
@@ -709,8 +750,11 @@ async function resolve(
     const outgoing = messageLinks(level.graph).filter((l) => l.source === gate.node.id)
     const side = outgoing.filter((l) => (l.label?.trim().toLowerCase() || 'approved') === label)
     const edited = decision.text.trim() !== textOf(gate.items).trim()
-    const items: Delivery[] = edited ? [{ kind: 'part', author: 'The human', text: decision.text }] : gate.items
-    const { kept } = filterLinks(ctx, level, side, decision.text, round)
+    const carried = decisionOf(gate.items)
+    const items: Delivery[] = edited
+      ? [{ kind: 'part', author: 'The human', text: decision.text, ...(carried ? { decision: carried } : {}) }]
+      : gate.items
+    const { kept } = filterLinks(ctx, level, side, decision.text, round, carried)
     const next = kept.map((link) => ({
       link,
       target: link.target,
@@ -783,7 +827,7 @@ function releaseHolding(level: Level, node: JoinNode, incoming: Link[]): Deliver
 
 function joinOutgoing(ctx: Ctx, level: Level, node: JoinNode, items: Delivery[], round: number): Link[] {
   const outgoing = messageLinks(level.graph).filter((l) => l.source === node.id)
-  return filterLinks(ctx, level, outgoing, textOf(items), round).kept
+  return filterLinks(ctx, level, outgoing, textOf(items), round, decisionOf(items)).kept
 }
 
 /**
@@ -938,6 +982,110 @@ function applySpawn(
     // The task goes in the chip: when a delegator says nothing but the tag, the chip IS its turn.
     chip: { type: 'spawn', text: `spawned ${node.name}: ${action.task.length > 90 ? `${action.task.slice(0, 89)}…` : action.task}` },
     transit: { id: link.id, reversed: false, ...(level.path.length ? { path: level.path } : {}) },
+  }
+}
+
+/**
+ * Where a Decision node's message goes: every outgoing link whose guard passes on its answers. A link
+ * marked default is the "else": taken only when no other link is.
+ */
+function routeDecision(ctx: Ctx, level: Level, turn: Turn, outgoing: Link[], items: Delivery[], round: number): Packet[] {
+  const regular = outgoing.filter((l) => !l.isDefault)
+  const fallback = outgoing.filter((l) => l.isDefault)
+  let { kept } = filterLinks(ctx, level, regular, turn.carry ?? turn.prose, round, turn.decision)
+  if (kept.length === 0 && fallback.length > 0) {
+    kept = filterLinks(ctx, level, fallback, turn.carry ?? turn.prose, round, turn.decision).kept
+  }
+  const keptIds = new Set(kept.map((l) => l.id))
+  ctx.cb.onBranch?.({
+    path: level.path,
+    nodeId: turn.id,
+    taken: kept.map((l) => l.id),
+    skipped: outgoing.filter((l) => !keptIds.has(l.id)).map((l) => l.id),
+  })
+  if (kept.length === 0 && outgoing.length > 0) {
+    notice(ctx, level, `nobranch:${turn.id}`, `${turn.name}: no outgoing link matched its answers, so the message stopped there. Mark one link as the default to catch the rest.`)
+  }
+  return kept.map((l) => packetTo(l.target, items, l))
+}
+
+/**
+ * Runs a Decision node: one call to a decision model with what reached the node as the state.
+ *
+ * It generates no text. The transcript shows its typed answers; what it passes on is the state it
+ * judged, followed by one line of verdict, so an agent downstream (the System 2 an uncertain answer
+ * escalates to) sees both the message and why it was sent there.
+ */
+async function runDecisionNode(
+  ctx: Ctx,
+  level: Level,
+  node: DecisionNode,
+  deliveries: Delivery[],
+  round: number,
+): Promise<Turn | null> {
+  const { cb } = ctx
+  const entryId = `m${++ctx.counter.value}`
+  const state = deliveries
+    .map((d) => (d.kind === 'part' ? `${d.author ?? 'someone'}: ${d.text}` : d.text))
+    .join('\n\n')
+  cb.onMessageStart({
+    id: entryId,
+    round,
+    agentId: node.id,
+    to: [],
+    text: '',
+    status: 'streaming',
+    tokensIn: 0,
+    tokensOut: 0,
+    startedAt: Date.now(),
+    speaker: node.name,
+    ...(level.path.length ? { path: level.path } : {}),
+  })
+  cb.onAgentStatus(node.id, 'thinking', pathArg(level.path))
+  ctx.queued.delete(queueKey(level, node.id))
+
+  try {
+    const result = await callDecision({
+      node,
+      state,
+      apiKey: decisionKey(node.provider, ctx.keys),
+      endpoint: resolveDecisionEndpoint(node.provider, ctx.decisionEndpoints),
+      signal: ctx.inner.signal,
+    })
+    const summary = summarizeDecision(result.answers)
+    cb.onMessageEnd(entryId, {
+      text: summary,
+      status: 'complete',
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      endedAt: Date.now(),
+      decision: result.answers,
+    })
+    cb.onDecision?.({ path: level.path, nodeId: node.id, answers: result.answers })
+    cb.onAgentStatus(node.id, 'done', pathArg(level.path))
+    // What the node forwards is the state it judged: the original words, not a rewrite of them.
+    const forwarded = deliveries.map((d) => d.text).join('\n\n')
+    return {
+      id: node.id,
+      name: node.name,
+      entryId,
+      prose: summary,
+      carry: `${forwarded}\n\n[${node.name}] ${summary.replace(/\n/g, '; ')}`,
+      actions: [],
+      decision: result.answers,
+    }
+  } catch (err) {
+    if (ctx.inner.signal.aborted) {
+      cb.onMessageEnd(entryId, { status: 'stopped', endedAt: Date.now() })
+      cb.onAgentStatus(node.id, 'idle', pathArg(level.path))
+      return null
+    }
+    const message = `${node.name}: ${err instanceof Error ? err.message : String(err)}`
+    cb.onMessageEnd(entryId, { status: 'error', text: message, endedAt: Date.now() })
+    cb.onAgentStatus(node.id, 'error', pathArg(level.path))
+    ctx.failed.error = new Error(message)
+    ctx.inner.abort()
+    throw ctx.failed.error
   }
 }
 
