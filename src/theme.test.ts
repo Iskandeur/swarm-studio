@@ -9,7 +9,8 @@ import { agentColor } from './theme'
 
 /** The eight hues the app hands out, from `HUES` in the store. */
 const HUES = [262, 168, 4, 32, 210, 300, 132, 48]
-const BACKGROUNDS = { light: '#fbf8fd', dark: '#131218' }
+// The theme's `background.default` per mode: the surface the transcript names sit on.
+const BACKGROUNDS = { light: '#f6f3fa', dark: '#131218' }
 
 function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   const a = s * Math.min(l, 1 - l)

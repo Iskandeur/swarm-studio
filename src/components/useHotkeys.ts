@@ -16,6 +16,7 @@ export const SHORTCUTS: Shortcut[] = [
   { keys: 'Ctrl/⌘ + Z', what: 'Undo' },
   { keys: 'Ctrl/⌘ + Shift + Z', what: 'Redo' },
   { keys: 'Ctrl/⌘ + Enter', what: 'Run the swarm, or stop it' },
+  { keys: 'Ctrl/⌘ + K', what: 'Prompt the graph: describe the swarm you want' },
   { keys: 'Ctrl/⌘ + D', what: 'Duplicate the selected agent' },
   { keys: 'Ctrl/⌘ + A', what: 'Tick every agent for bulk editing' },
   { keys: 'N', what: 'Add an agent' },
@@ -37,13 +38,21 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || Boolean(target.isContentEditable)
 }
 
-/** Binds the shortcuts a graph editor is expected to have. `onHelp` opens the cheat sheet. */
-export function useHotkeys({ onHelp }: { onHelp: () => void }) {
+/**
+ * Binds the shortcuts a graph editor is expected to have. `onHelp` opens the cheat sheet, `onPrompt`
+ * the prompt — that one works even from inside a field, the way a command palette does.
+ */
+export function useHotkeys({ onHelp, onPrompt }: { onHelp: () => void; onPrompt?: () => void }) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey
+      if (mod && event.key.toLowerCase() === 'k' && onPrompt) {
+        event.preventDefault()
+        onPrompt()
+        return
+      }
       if (isTypingTarget(event.target)) return
       const store = useStore.getState()
-      const mod = event.metaKey || event.ctrlKey
 
       if (mod && event.key.toLowerCase() === 'z') {
         event.preventDefault()
@@ -138,5 +147,5 @@ export function useHotkeys({ onHelp }: { onHelp: () => void }) {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onHelp])
+  }, [onHelp, onPrompt])
 }

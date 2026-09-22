@@ -17,6 +17,7 @@ import {
   useMediaQuery,
 } from '@mui/material'
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
+import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import LinkOffRoundedIcon from '@mui/icons-material/LinkOffRounded'
@@ -45,8 +46,8 @@ const HUE_NAMES: Record<number, string> = {
   300: 'magenta',
 }
 
-/** Left panel: the agent roster, and everything about the one you selected. */
-export function Inspector() {
+/** The Build panel: the agent roster, and everything about the one you selected. */
+export function Inspector({ onClose }: { onClose?: () => void } = {}) {
   // The graph on the canvas: the swarm, or the inside of the block being edited.
   const spec = useGraph()
   const selectedId = useStore((s) => s.selectedId)
@@ -105,9 +106,9 @@ export function Inspector() {
 
   return (
     <Stack sx={{ height: '100%', overflow: 'hidden' }}>
-      <Box sx={{ px: 2, pt: 2, pb: 1, display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
-        <Typography variant="subtitle2" sx={{ flex: 1, opacity: 0.7 }}>
-          AGENTS · {spec.agents.length}
+      <Box sx={{ px: 2, pt: 1.5, pb: 1, display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+        <Typography variant="overline" sx={{ flex: 1, color: 'text.secondary', lineHeight: 1.6 }}>
+          Agents · {spec.agents.length}
         </Typography>
         {/* On a phone this panel is a modal sheet, so the bottom bar's Pause and Stop are behind it.
             A run you are watching from here has to be stoppable from here. */}
@@ -136,6 +137,13 @@ export function Inspector() {
         <Button size="small" startIcon={<AddRoundedIcon />} onClick={addAgent}>
           Add
         </Button>
+        {onClose && (
+          <Tooltip title="Close">
+            <IconButton size="small" onClick={onClose} aria-label="Close the build panel" sx={{ ml: 0.5 }}>
+              <CloseRoundedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
       </Box>
 
       {/* flexShrink 0 on everything above the detail: in a column flex the roster was squeezed under
@@ -288,8 +296,8 @@ export function Inspector() {
 
       {flowNodes.length > 0 && (
         <>
-          <Typography variant="subtitle2" sx={{ px: 2, pb: 0.5, opacity: 0.7, flexShrink: 0 }}>
-            NODES · {flowNodes.length}
+          <Typography variant="overline" sx={{ px: 2, pb: 0.5, color: 'text.secondary', flexShrink: 0, lineHeight: 1.6 }}>
+            Nodes · {flowNodes.length}
           </Typography>
           <Stack direction="row" spacing={0.5} useFlexGap sx={{ px: 1.5, pb: 1.5, flexWrap: 'wrap', maxHeight: 96, overflowY: 'auto', flexShrink: 0 }}>
             {flowNodes.map((n) => (
@@ -321,13 +329,16 @@ export function Inspector() {
       )}
 
       {!link && !agent && !flowNode && (
-        <Box sx={{ p: 3, opacity: 0.6 }}>
+        <Box sx={{ p: 3, color: 'text.secondary' }}>
           <Typography variant="body2">
             Pick an agent above to set its <b>model</b>, provider and system prompt.
           </Typography>
           <Typography variant="body2" sx={{ mt: 1.5 }}>
             To link agents, drag from a node's right dot onto another node's left dot. Click a link to
             give it a label, a condition or a loop budget; the ✕ on the curve cuts it.
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 1.5 }}>
+            Or skip the clicking: describe the swarm in the bar below and a model builds it.
           </Typography>
         </Box>
       )}

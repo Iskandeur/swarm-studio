@@ -383,9 +383,14 @@ kind of edit), streams it like a real answer, and says it is a demo.
 
 ## 4. Interface
 
-- **Node palette** (left rail, and a `+` menu on mobile): Agent, Decision, Condition, Join, Output,
-  Human gate, Memory, Block (opens the library).
-- **Prompt the graph**: a button in the top bar (an icon on a phone) opens the generator (§3.10).
+- **Node palette** (a pill at the top-left of the canvas, on every layout): Agent, Decision,
+  Condition, Join, Output, Human gate, Memory, Block (opens the library).
+- **Prompt the graph** (§3.10): the first screen is the prompt card, over the canvas; once a graph
+  is loaded it folds into the command bar under the canvas (a strip above the navigation on a
+  phone). `Ctrl/⌘ + K`, the expand button on the bar, or the ⋮ menu bring the card back.
+- **Layout**: the side panels — Build (roster + inspector) on the left, Transcript on the right —
+  are closed until asked; clicking a node opens Build, starting a run opens Transcript. Run, the
+  task and the topology settings live at the right of the command bar.
 - **Shapes.** Agent: the current card. Condition: a diamond with `true`/`false` handles. Join: a
   narrow bar. Output: a flag. Human gate: a hand. Memory: a cylinder showing its entry count, which
   flashes in the writer's colour on each write. Block: a stacked card with a mini progress line

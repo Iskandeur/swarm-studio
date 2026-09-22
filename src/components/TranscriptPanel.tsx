@@ -26,7 +26,9 @@ import AltRouteRoundedIcon from '@mui/icons-material/AltRouteRounded'
 import EditNoteRoundedIcon from '@mui/icons-material/EditNoteRounded'
 import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded'
 import BlockRoundedIcon from '@mui/icons-material/BlockRounded'
+import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import LayersRoundedIcon from '@mui/icons-material/LayersRounded'
+import { RunStatus } from './RunBar'
 import { useStore } from '../store'
 import { nodesOf } from '../engine/graph'
 import { stripActionTags } from '../engine/actions'
@@ -58,7 +60,7 @@ function download(text: string, filename: string, type: string) {
 }
 
 /** Right panel: what was actually said, in order, colour-matched to the graph. */
-export function TranscriptPanel() {
+export function TranscriptPanel({ onClose }: { onClose?: () => void } = {}) {
   const transcript = useStore((s) => s.transcript)
   const spec = useStore((s) => s.spec)
   const agents = spec.agents
@@ -111,7 +113,7 @@ export function TranscriptPanel() {
 
   return (
     <Stack sx={{ height: '100%', overflow: 'hidden' }}>
-      <Box sx={{ px: 2, pt: 2, pb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{ px: 2, pt: 1.5, pb: 0.75, display: 'flex', alignItems: 'center', gap: 1 }}>
         {hasMemory ? (
           <ToggleButtonGroup size="small" exclusive value={view} onChange={(_, value) => value && setView(value)} sx={{ flex: 1 }}>
             <ToggleButton value="transcript" sx={{ px: 1, py: 0.25, fontSize: 11 }}>
@@ -122,8 +124,8 @@ export function TranscriptPanel() {
             </ToggleButton>
           </ToggleButtonGroup>
         ) : (
-          <Typography variant="subtitle2" sx={{ opacity: 0.7, flex: 1 }}>
-            TRANSCRIPT · {transcript.length}
+          <Typography variant="overline" sx={{ color: 'text.secondary', flex: 1, lineHeight: 1.6 }}>
+            Transcript · {transcript.length}
           </Typography>
         )}
         <ToggleButtonGroup
@@ -201,7 +203,21 @@ export function TranscriptPanel() {
             <ListItemText primary={`Download ${exportFilename(spec, 'json')}`} />
           </MenuItem>
         </Menu>
+        {onClose && (
+          <Tooltip title="Close">
+            <IconButton size="small" onClick={onClose} aria-label="Close the transcript">
+              <CloseRoundedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
       </Box>
+
+      {/* Where the run stands: it reads here, next to the words, rather than in the command bar. */}
+      {(phase !== 'idle' || transcript.length > 0) && (
+        <Box sx={{ px: 2, pb: 1 }}>
+          <RunStatus />
+        </Box>
+      )}
 
       {spoke.length > 1 && (
         <Box sx={{ px: 1.5, pb: 1, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
@@ -249,9 +265,9 @@ export function TranscriptPanel() {
         sx={{ p: 1.5, overflowY: 'auto', flex: 1 }}
       >
         {visible.length === 0 && (
-          <Typography variant="body2" sx={{ p: 1.5, opacity: 0.55 }}>
-            Nothing said yet. Write a task at the bottom and press Run — the demo provider needs no
-            API key.
+          <Typography variant="body2" sx={{ p: 1.5, color: 'text.secondary' }}>
+            Nothing said yet. Press Run and the conversation lands here — the demo provider needs no
+            API key. The task the agents receive is under the Task button.
           </Typography>
         )}
 

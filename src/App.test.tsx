@@ -5,6 +5,9 @@
  * They exist because a graph editor fails in a way unit tests never see (an import-time throw, a
  * hook order change, a missing browser API) and that failure is a white page. The phone case gets
  * its own test because the layout it exercises shares almost no container with the desktop one.
+ *
+ * The app opens on the prompt card, with the side panels closed: a test that needs the roster or
+ * the transcript opens that panel first, the way a person would — one click, from the top bar.
  */
 import assert from 'node:assert/strict'
 import { test, afterEach, beforeEach } from 'vitest'
@@ -33,27 +36,37 @@ afterEach(() => {
   localStorage.clear()
 })
 
+const openBuild = () => fireEvent.click(screen.getByRole('button', { name: /build panel/i }))
+const openLog = () => fireEvent.click(screen.getByRole('button', { name: /transcript panel/i }))
+/** Items that live in the ⋮ menu: one click to open it, one on the item. */
+async function pickMore(item: RegExp) {
+  fireEvent.click(screen.getByRole('button', { name: /^more$/i }))
+  fireEvent.click(await waitFor(() => screen.getByRole('menuitem', { name: item })))
+}
+
 test('the app mounts and shows the default swarm', async () => {
   render(<App />)
 
   assert.ok(screen.getByText('Swarm Studio'))
-  // Every agent of the default preset shows up, in the roster and on the canvas.
+  assert.ok(screen.getByRole('button', { name: /run swarm/i }))
+  // Every agent of the default preset shows up in the roster once the Build panel is open.
+  openBuild()
   for (const agent of AGENTS) {
     assert.ok(screen.getAllByText(agent.name).length > 0, `${agent.name} is on screen`)
   }
-  assert.ok(screen.getByRole('button', { name: /run swarm/i }))
 })
 
 test('selecting an agent opens its prompt for editing', async () => {
   render(<App />)
+  openBuild()
 
   const second = AGENTS[1]
-  fireEvent.click(screen.getAllByText(second.name)[0])
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(`^select ${second.name},`, 'i') }))
   const prompt = await waitFor(() => screen.getByLabelText(/system prompt/i))
   assert.equal((prompt as HTMLTextAreaElement).value, second.systemPrompt)
 })
 
-test('running the demo swarm streams a message into the transcript', async () => {
+test('running the demo swarm streams a message into the transcript, which opens by itself', async () => {
   render(<App />)
 
   fireEvent.click(screen.getByRole('button', { name: /run swarm/i }))
@@ -82,8 +95,9 @@ test('at phone width the transcript sheet can pause and stop the run on its own'
  * The four things Iskandeur could not do or find on 14/09. Each one is a missing affordance, so
  * each gets a test that fails if the affordance disappears again.
  */
-test('the model field is reachable without hunting: an agent is already selected', async () => {
+test('the model field is reachable without hunting: one click opens the panel on a selected agent', async () => {
   render(<App />)
+  openBuild()
 
   const model = screen.getByLabelText(/^model$/i)
   assert.equal((model as HTMLInputElement).value, AGENTS[0].model)
@@ -98,6 +112,7 @@ test('a link can be cut from the panel, in both directions', async () => {
   // measured the nodes, and jsdom has no layout engine to measure. This test covers the other
   // affordance, which is the one that works without hover — and is the one a phone needs.
   render(<App />)
+  openBuild()
 
   // The first agent is selected on mount, so the panel lists ITS links — both directions.
   const selected = AGENTS[0]
@@ -121,9 +136,12 @@ test('a link can be cut from the panel, in both directions', async () => {
   )
 })
 
-test('the topologies explain themselves in a popover', async () => {
+test('the run settings hold the task and the topology, and the topologies explain themselves', async () => {
   render(<App />)
 
+  fireEvent.click(screen.getByRole('button', { name: /task and run settings/i }))
+  assert.ok(await waitFor(() => screen.getByLabelText(/task given to the entry agents/i)))
+  assert.ok(screen.getByLabelText(/max rounds/i))
   fireEvent.click(screen.getByRole('button', { name: /explain the topologies/i }))
   await waitFor(() => assert.ok(screen.getByText(/how a turn is handed on/i)))
   // All three are described, not just the current one.
@@ -134,6 +152,7 @@ test('the topologies explain themselves in a popover', async () => {
 
 test('transcript output is formatted, not dumped as one blob', async () => {
   render(<App />)
+  openLog()
   useStore.setState({
     transcript: [
       {
@@ -164,8 +183,8 @@ test('the share dialog copies a swarm and a clipping, and takes a paste', async 
   // graphes […] pour qu'un pote puisse reproduire la config".
   render(<App />)
 
-  fireEvent.click(screen.getByRole('button', { name: /share this configuration/i }))
-  await waitFor(() => assert.ok(screen.getByText(/share this configuration/i)))
+  await pickMore(/share this configuration/i)
+  await waitFor(() => assert.ok(screen.getByRole('dialog')))
 
   // Both blocks are offered: the whole swarm, and just what is selected.
   assert.match(screen.getByText(/the whole swarm/i).textContent ?? '', /\d+ agents, \d+ links/)
@@ -193,7 +212,7 @@ test('the share dialog copies a swarm and a clipping, and takes a paste', async 
 
 test('a bad paste explains itself instead of doing nothing', async () => {
   render(<App />)
-  fireEvent.click(screen.getByRole('button', { name: /share this configuration/i }))
+  await pickMore(/share this configuration/i)
   fireEvent.click(await waitFor(() => screen.getByRole('tab', { name: /paste in/i })))
 
   const box = screen.getByLabelText(/paste a swarm or a clipping/i)
@@ -209,12 +228,26 @@ test('every node carries a visible delete button', async () => {
   // He reported having no way to delete a node except the Delete key. The roster button is the one
   // jsdom can see; the ✕ on the node itself needs React Flow to have measured the canvas.
   render(<App />)
+  openBuild()
   for (const agent of AGENTS) {
     assert.ok(
       screen.getByRole('button', { name: new RegExp(`delete agent ${agent.name}`, 'i') }),
       `${agent.name} can be deleted from the roster`,
     )
   }
+})
+
+test('the side panels close from their own header', async () => {
+  render(<App />)
+  openBuild()
+  assert.ok(screen.getByLabelText(/^model$/i))
+  fireEvent.click(screen.getByRole('button', { name: /close the build panel/i }))
+  await waitFor(() => assert.equal(screen.queryAllByLabelText(/^model$/i).length, 0))
+
+  openLog()
+  assert.ok(screen.getByText(/transcript · 0/i))
+  fireEvent.click(screen.getByRole('button', { name: /close the transcript/i }))
+  await waitFor(() => assert.equal(screen.queryAllByText(/transcript · 0/i).length, 0))
 })
 
 test('at phone width the panels become sheets and Run is one tap away', async () => {
@@ -237,7 +270,7 @@ test('at phone width the task sheet carries the topology controls', async () => 
   setViewport(390)
   render(<App />)
 
-  // Topology lives in the app bar on desktop; on a phone it moves into the Task sheet.
+  // Topology lives behind the run settings on desktop; on a phone it moves into the Task sheet.
   assert.equal(screen.queryAllByLabelText(/topology/i).length, 0)
   fireEvent.click(screen.getByRole('button', { name: /task/i }))
   await waitFor(() => assert.ok(screen.getByLabelText(/topology/i)))

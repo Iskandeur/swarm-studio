@@ -146,6 +146,11 @@ interface State {
   /** Models discovered from an endpoint's /models, offered as autocomplete options. */
   discoveredModels: Partial<Record<ProviderId, string[]>>
   themeMode: 'light' | 'dark'
+  /**
+   * Bumped whenever the whole graph is replaced (a starter swarm, a generated one, a paste of a
+   * swarm). The canvas reframes on it, and the front-door prompt gets out of the way.
+   */
+  graphEpoch: number
 
   /** Set while the canvas shows the inside of a block definition. */
   editingBlockId?: string
@@ -503,6 +508,7 @@ export const useStore = create<State>((set, get) => {
     decisionEndpoints: load(DECISION_ENDPOINTS_KEY, {}),
     discoveredModels: load(MODELS_KEY, {}),
     themeMode: load<'light' | 'dark'>(THEME_KEY, 'dark'),
+    graphEpoch: 0,
     library: load<BlockDef[]>(LIBRARY_KEY, []),
     runGraph: EMPTY_RUN_GRAPH,
     memoryEntries: {},
@@ -519,7 +525,7 @@ export const useStore = create<State>((set, get) => {
       haltRun()
       const spec = structuredClone(preset)
       persistSpec(spec)
-      set({
+      set((s) => ({
         ...clearedRun,
         spec,
         phase: 'idle',
@@ -531,7 +537,8 @@ export const useStore = create<State>((set, get) => {
         multiIds: [],
         past: [],
         future: [],
-      })
+        graphEpoch: s.graphEpoch + 1,
+      }))
     },
 
     addAgent: () => {
@@ -672,6 +679,7 @@ export const useStore = create<State>((set, get) => {
         multiIds: [],
         past: [...s.past, previous].slice(-HISTORY_DEPTH),
         future: [],
+        graphEpoch: s.graphEpoch + 1,
       }))
     },
 
