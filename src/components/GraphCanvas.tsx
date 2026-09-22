@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   applyNodeChanges,
   Background,
@@ -6,6 +6,8 @@ import {
   Controls,
   MarkerType,
   ReactFlow,
+  getNodesBounds,
+  getViewportForBounds,
   useNodesInitialized,
   useReactFlow,
   type Connection,
@@ -32,7 +34,16 @@ type CanvasNode = AgentFlowNode | FlowFlowNode
 const NO_STATUSES: Record<string, AgentStatus> = {}
 const NO_RUN_GRAPH: RunGraph = { agents: [], nodes: [], links: [] }
 
-export function GraphCanvas({ onAgentOpen, children }: { onAgentOpen?: () => void; children?: ReactNode } = {}) {
+export function GraphCanvas({
+  onAgentOpen,
+  children,
+  layoutKey,
+}: {
+  onAgentOpen?: () => void
+  children?: ReactNode
+  /** Changes when the room around the canvas changes (a side panel opened or closed). */
+  layoutKey?: string
+} = {}) {
   const theme = useTheme()
   const mode = theme.palette.mode as 'light' | 'dark'
   /** Kept locally: edges are rebuilt from the store each render, so their selection would be lost.
@@ -41,6 +52,7 @@ export function GraphCanvas({ onAgentOpen, children }: { onAgentOpen?: () => voi
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const graph = useGraph()
   const editingBlockId = useStore((s) => s.editingBlockId)
+  const graphEpoch = useStore((s) => s.graphEpoch)
   const topStatuses = useStore((s) => s.statuses)
   const nestedStatuses = useStore((s) => s.nestedStatuses)
   const transcript = useStore((s) => s.transcript)
@@ -149,12 +161,12 @@ export function GraphCanvas({ onAgentOpen, children }: { onAgentOpen?: () => voi
    * nodes are not measured yet — so the graph opened at zoom 1 with half the swarm off the right
    * edge. Frame it once, the first time the nodes have real dimensions, and never again: a refit
    * after that would yank the canvas back every time the keyboard opened. Opening a block is a new
-   * picture, so it frames again.
+   * picture, so it frames again — and so is a whole new graph (generated, or a starter swarm).
    */
-  const { fitView } = useReactFlow()
+  const { fitView, getNodes, setViewport } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
   const [framedFor, setFramedFor] = useState<string | null>(null)
-  const frameKey = editingBlockId ?? '<swarm>'
+  const frameKey = `${editingBlockId ?? '<swarm>'}#${graphEpoch}`
 
   useEffect(() => {
     if (!nodesInitialized || framedFor === frameKey) return
@@ -162,6 +174,31 @@ export function GraphCanvas({ onAgentOpen, children }: { onAgentOpen?: () => voi
     // Never above 1: a swarm of two nodes framed at zoom 2 looks like a rendering bug.
     void fitView({ padding: 0.3, maxZoom: 1 })
   }, [nodesInitialized, framedFor, frameKey, fitView])
+
+  /**
+   * A side panel opening takes a third of the width; the graph that was framed for the full width
+   * now has nodes under the panel. Re-frame for the room that is actually left — measured HERE, on
+   * the wrapper, not through React Flow's `fitView`: that one frames for the size its
+   * ResizeObserver last reported, and a screenshot caught it framing 1 100 px of canvas as if it
+   * still had 1 440. This runs on a layout change only (a click), never on a resize: the phone
+   * keyboard is a resize, and a refit at that moment yanks the canvas out of the user's hands.
+   */
+  const wrapper = useRef<HTMLDivElement>(null)
+  // A ref, not state: as state it was a dependency of this effect, so recording the key re-ran the
+  // effect, whose cleanup cancelled the timer it had just armed. The refit never fired.
+  const seenLayout = useRef(layoutKey)
+  useEffect(() => {
+    if (layoutKey === seenLayout.current) return
+    seenLayout.current = layoutKey
+    const timer = setTimeout(() => {
+      const el = wrapper.current
+      const measured = getNodes().filter((n) => n.measured?.width && n.measured?.height)
+      if (!el || measured.length === 0) return
+      const bounds = getNodesBounds(measured)
+      void setViewport(getViewportForBounds(bounds, el.clientWidth, el.clientHeight, 0.2, 1, 0.3))
+    }, 60)
+    return () => clearTimeout(timer)
+  }, [layoutKey, getNodes, setViewport])
 
   /**
    * The one exception to "frame once": a run that GROWS the graph. Spawned helpers are placed to the
@@ -262,6 +299,7 @@ export function GraphCanvas({ onAgentOpen, children }: { onAgentOpen?: () => voi
 
   return (
     <Box
+      ref={wrapper}
       sx={{
         position: 'relative',
         height: '100%',

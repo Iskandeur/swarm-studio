@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Badge,
@@ -28,14 +28,14 @@ import StopRoundedIcon from '@mui/icons-material/StopRounded'
 import { Panel, ReactFlowProvider } from '@xyflow/react'
 import { buildTheme } from './theme'
 import { useStore } from './store'
-import { TopBar } from './components/TopBar'
+import { PresetMenu, TopBar } from './components/TopBar'
 import { Inspector } from './components/Inspector'
 import { GraphCanvas } from './components/GraphCanvas'
 import { TranscriptPanel } from './components/TranscriptPanel'
-import { RunBar } from './components/RunBar'
+import { RunBar, RunControls } from './components/RunBar'
 import { SettingsDialog } from './components/SettingsDialog'
 import { ShareDialog } from './components/ShareDialog'
-import { GraphPromptDialog } from './components/GraphPromptDialog'
+import { PromptDock, PromptHero, PromptStrip } from './components/PromptComposer'
 import { SHORTCUTS, useHotkeys } from './components/useHotkeys'
 import { NodePalette } from './components/NodePalette'
 import { BlockLibrary } from './components/BlockLibrary'
@@ -49,22 +49,44 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
-  const [promptOpen, setPromptOpen] = useState(false)
+  const [presetAnchor, setPresetAnchor] = useState<HTMLElement | null>(null)
+  // The front door: open on every load. Describe → Generate is the first thing the app offers;
+  // everything else is one click behind it.
+  const [heroOpen, setHeroOpen] = useState(true)
   const notice = useStore((s) => s.notice)
   const dismissNotice = useStore((s) => s.dismissNotice)
+  const graphEpoch = useStore((s) => s.graphEpoch)
+  const phase = useStore((s) => s.phase)
 
-  useHotkeys({ onHelp: () => setHelpOpen(true) })
+  const openHero = useCallback(() => setHeroOpen(true), [])
+  useHotkeys({ onHelp: () => setHelpOpen(true), onPrompt: openHero })
+
+  // A graph that just landed (generated, or a starter swarm picked from the hero) is the thing to
+  // look at, so the card gets out of the way. So does a run: watching it is the point.
+  const seenEpoch = useRef(graphEpoch)
+  useEffect(() => {
+    if (graphEpoch !== seenEpoch.current) {
+      seenEpoch.current = graphEpoch
+      setHeroOpen(false)
+    }
+  }, [graphEpoch])
+  useEffect(() => {
+    if (phase === 'running') setHeroOpen(false)
+  }, [phase])
 
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Shell
+        heroOpen={heroOpen}
+        onHeroOpen={openHero}
+        onHeroClose={() => setHeroOpen(false)}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
         onOpenShare={() => setShareOpen(true)}
-        onOpenPrompt={() => setPromptOpen(true)}
+        onOpenPresets={setPresetAnchor}
       />
-      <GraphPromptDialog open={promptOpen} onClose={() => setPromptOpen(false)} />
+      <PresetMenu anchorEl={presetAnchor} onClose={() => setPresetAnchor(null)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <ShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} />
@@ -76,7 +98,7 @@ export default function App() {
         open={Boolean(notice)}
         autoHideDuration={9000}
         onClose={dismissNotice}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
         <Alert severity="info" variant="filled" onClose={dismissNotice} sx={{ maxWidth: 520 }}>
           {notice}
@@ -114,7 +136,7 @@ function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void
             </Box>
           ))}
         </Stack>
-        <Typography variant="caption" sx={{ display: 'block', mt: 2, opacity: 0.65 }}>
+        <Typography variant="caption" sx={{ display: 'block', mt: 2, color: 'text.secondary' }}>
           Shortcuts are ignored while you are typing in a field.
         </Typography>
       </DialogContent>
@@ -127,19 +149,27 @@ function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void
   )
 }
 
-function Shell({
-  onOpenSettings,
-  onOpenHelp,
-  onOpenShare,
-  onOpenPrompt,
-}: {
+interface ShellProps {
+  heroOpen: boolean
+  onHeroOpen: () => void
+  onHeroClose: () => void
   onOpenSettings: () => void
   onOpenHelp: () => void
   onOpenShare: () => void
-  onOpenPrompt: () => void
-}) {
-  // `md` is the switch: below it there is no room for three columns side by side.
+  onOpenPresets: (anchor: HTMLElement) => void
+}
+
+function Shell(props: ShellProps) {
+  // `md` is the switch: below it there is no room for side panels next to the graph.
   const mobile = useMediaQuery('(max-width:899.95px)')
+  const [buildOpen, setBuildOpen] = useState(false)
+  const [logOpen, setLogOpen] = useState(false)
+  const phase = useStore((s) => s.phase)
+
+  // The transcript opens itself when a run starts: that is where the words go.
+  useEffect(() => {
+    if (phase === 'running') setLogOpen(true)
+  }, [phase])
 
   return (
     <Box
@@ -153,56 +183,165 @@ function Shell({
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
+        bgcolor: 'background.default',
       }}
     >
-      <TopBar onOpenSettings={onOpenSettings} onOpenHelp={onOpenHelp} onOpenShare={onOpenShare} onOpenPrompt={onOpenPrompt} />
-      {mobile ? <MobileBody /> : <DesktopBody />}
+      <TopBar
+        onOpenSettings={props.onOpenSettings}
+        onOpenHelp={props.onOpenHelp}
+        onOpenShare={props.onOpenShare}
+        onOpenPrompt={props.onHeroOpen}
+        onOpenPresets={props.onOpenPresets}
+        buildOpen={!mobile && buildOpen}
+        onToggleBuild={() => setBuildOpen((v) => !v)}
+        logOpen={!mobile && logOpen}
+        onToggleLog={() => setLogOpen((v) => !v)}
+      />
+      {mobile ? (
+        <MobileBody {...props} />
+      ) : (
+        <DesktopBody
+          {...props}
+          buildOpen={buildOpen}
+          onBuildOpen={() => setBuildOpen(true)}
+          onBuildClose={() => setBuildOpen(false)}
+          logOpen={logOpen}
+          onLogClose={() => setLogOpen(false)}
+        />
+      )}
     </Box>
   )
 }
 
-function Canvas({ onAgentOpen, compact = false }: { onAgentOpen?: () => void; compact?: boolean } = {}) {
+function Canvas({
+  onAgentOpen,
+  compact = false,
+  palette = true,
+  layoutKey,
+}: {
+  onAgentOpen?: () => void
+  compact?: boolean
+  palette?: boolean
+  layoutKey?: string
+}) {
   const [libraryOpen, setLibraryOpen] = useState(false)
   return (
     <ReactFlowProvider>
-      <GraphCanvas onAgentOpen={onAgentOpen}>
+      <GraphCanvas onAgentOpen={onAgentOpen} layoutKey={layoutKey}>
         {/* On the canvas, not in a side panel: adding a node is a canvas gesture, and on a phone
             the panels are sheets that would cover the place the node appears. */}
-        <Panel position="top-left">
-          <NodePalette compact={compact} onOpenLibrary={() => setLibraryOpen(true)} />
-        </Panel>
+        {palette && (
+          <Panel position="top-left">
+            <NodePalette compact={compact} onOpenLibrary={() => setLibraryOpen(true)} />
+          </Panel>
+        )}
       </GraphCanvas>
       <BlockLibrary open={libraryOpen} onClose={() => setLibraryOpen(false)} />
     </ReactFlowProvider>
   )
 }
 
-function DesktopBody() {
+/**
+ * A side panel that takes its width only while open, so the canvas keeps the rest. It opens in one
+ * step, not with a width transition: React Flow measures its container on every resize, and a
+ * sliding panel gave it 200 ms of intermediate widths to frame the graph against.
+ */
+function SidePanel({ open, width, side, children }: { open: boolean; width: number; side: 'left' | 'right'; children: React.ReactNode }) {
+  if (!open) return null
   return (
-    <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
-      <Paper elevation={0} square sx={{ width: 320, flexShrink: 0, borderRight: '1px solid', borderColor: 'divider' }}>
-        <Inspector />
-      </Paper>
+    <Box
+      data-panel={side}
+      sx={{
+        width,
+        flexShrink: 0,
+        overflow: 'hidden',
+        borderLeft: side === 'right' ? '1px solid' : 'none',
+        borderRight: side === 'left' ? '1px solid' : 'none',
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
+      }}
+    >
+      {children}
+    </Box>
+  )
+}
 
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <Box sx={{ flex: 1, minHeight: 0 }}>
-          <Canvas />
+function DesktopBody({
+  heroOpen,
+  onHeroOpen,
+  onHeroClose,
+  onOpenSettings,
+  onOpenPresets,
+  buildOpen,
+  onBuildOpen,
+  onBuildClose,
+  logOpen,
+  onLogClose,
+}: ShellProps & {
+  buildOpen: boolean
+  onBuildOpen: () => void
+  onBuildClose: () => void
+  logOpen: boolean
+  onLogClose: () => void
+}) {
+  return (
+    <>
+      <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        <SidePanel open={buildOpen} width={340} side="left">
+          <Inspector onClose={onBuildClose} />
+        </SidePanel>
+
+        <Box sx={{ flex: 1, minWidth: 0, position: 'relative' }}>
+          {/* Selecting on the canvas opens the panel with that node's settings: manual editing is a
+              click away, never in the way. */}
+          <Canvas onAgentOpen={onBuildOpen} palette={!heroOpen} layoutKey={`${buildOpen}:${logOpen}`} />
+          {heroOpen && (
+            <PromptHero
+              onClose={onHeroClose}
+              onOpenSettings={onOpenSettings}
+              onOpenPresets={onOpenPresets}
+              onBuildByHand={() => {
+                onHeroClose()
+                onBuildOpen()
+              }}
+            />
+          )}
         </Box>
-        <RunBar />
+
+        <SidePanel open={logOpen} width={400} side="right">
+          <TranscriptPanel onClose={onLogClose} />
+        </SidePanel>
       </Box>
 
-      <Paper elevation={0} square sx={{ width: 390, flexShrink: 0, borderLeft: '1px solid', borderColor: 'divider' }}>
-        <TranscriptPanel />
-      </Paper>
-    </Box>
+      {/* The command bar: describe on the left, run on the right. One row, nothing else. */}
+      <Box
+        sx={{
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'center',
+          gap: 1.5,
+          px: 2,
+          py: 1.25,
+          borderTop: '1px solid',
+          borderColor: 'divider',
+        }}
+      >
+        {heroOpen ? null : <PromptDock onExpand={onHeroOpen} />}
+        <Box sx={{ pb: 0.25 }}>
+          <RunControls />
+        </Box>
+      </Box>
+    </>
   )
 }
 
 /**
  * Phone layout: the graph keeps the whole screen, because watching the run is the point. The three
- * panels become bottom sheets, and Run stays one tap away whichever sheet is open.
+ * panels become bottom sheets, the prompt is a strip above the navigation, and Run stays one tap
+ * away whichever sheet is open.
  */
-function MobileBody() {
+function MobileBody({ heroOpen, onHeroOpen, onHeroClose, onOpenSettings, onOpenPresets }: ShellProps) {
   const [sheet, setSheet] = useState<Sheet>(null)
   const phase = useStore((s) => s.phase)
   const start = useStore((s) => s.start)
@@ -215,9 +354,22 @@ function MobileBody() {
 
   return (
     <>
-      <Box sx={{ flex: 1, minHeight: 0 }}>
-        <Canvas compact onAgentOpen={() => setSheet('agents')} />
+      <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <Canvas compact onAgentOpen={() => setSheet('agents')} palette={!heroOpen} />
+        {heroOpen && (
+          <PromptHero
+            onClose={onHeroClose}
+            onOpenSettings={onOpenSettings}
+            onOpenPresets={onOpenPresets}
+            onBuildByHand={() => {
+              onHeroClose()
+              setSheet('agents')
+            }}
+          />
+        )}
       </Box>
+
+      {!heroOpen && <PromptStrip onOpen={onHeroOpen} />}
 
       <Paper elevation={0} square sx={{ borderTop: '1px solid', borderColor: 'divider', flexShrink: 0 }}>
         {running && <LinearProgress sx={{ height: 2 }} />}
@@ -260,13 +412,13 @@ function MobileBody() {
       </Paper>
 
       <BottomSheet open={sheet === 'agents'} onClose={() => setSheet(null)}>
-        <Inspector />
+        <Inspector onClose={() => setSheet(null)} />
       </BottomSheet>
       <BottomSheet open={sheet === 'setup'} onClose={() => setSheet(null)} height="auto">
-        <RunBar layout="sheet" />
+        <RunBar />
       </BottomSheet>
       <BottomSheet open={sheet === 'log'} onClose={() => setSheet(null)}>
-        <TranscriptPanel />
+        <TranscriptPanel onClose={() => setSheet(null)} />
       </BottomSheet>
     </>
   )

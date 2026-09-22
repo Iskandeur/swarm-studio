@@ -1,8 +1,11 @@
 import { createTheme, type Theme } from '@mui/material/styles'
 
 /**
- * Material 3-flavoured theme: one accent, soft surfaces, generous radii, no chrome.
+ * Material 3-flavoured theme: one accent, soft surfaces, one radius scale, no chrome.
  * Both modes are first-class — the graph is read as often at night as in daylight.
+ *
+ * The palette is deliberately short: primary carries every action, `text.secondary` carries every
+ * hint, and the agents' own hues (see `agentColor`) are the only other colours on the screen.
  */
 export function buildTheme(mode: 'light' | 'dark'): Theme {
   const dark = mode === 'dark'
@@ -13,26 +16,44 @@ export function buildTheme(mode: 'light' | 'dark'): Theme {
       secondary: { main: dark ? '#7fd1c1' : '#00695f' },
       error: { main: dark ? '#f2b8b5' : '#b3261e' },
       background: {
-        default: dark ? '#131218' : '#fbf8fd',
+        default: dark ? '#131218' : '#f6f3fa',
         paper: dark ? '#1c1b22' : '#ffffff',
       },
-      divider: dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.09)',
+      text: {
+        primary: dark ? '#e6e1e9' : '#1d1b20',
+        secondary: dark ? 'rgba(230,225,233,0.62)' : 'rgba(29,27,32,0.62)',
+      },
+      divider: dark ? 'rgba(255,255,255,0.10)' : 'rgba(29,27,32,0.10)',
     },
-    shape: { borderRadius: 14 },
+    shape: { borderRadius: 12 },
+    spacing: 8,
     typography: {
       fontFamily: '"Roboto", system-ui, sans-serif',
+      h5: { fontWeight: 600, letterSpacing: -0.2 },
       h6: { fontWeight: 500, letterSpacing: 0.1 },
+      subtitle1: { fontWeight: 500 },
       subtitle2: { fontWeight: 500, letterSpacing: 0.2 },
+      overline: { fontWeight: 600, letterSpacing: 0.8, fontSize: 11 },
       button: { textTransform: 'none', fontWeight: 500, letterSpacing: 0.1 },
-      caption: { letterSpacing: 0.3 },
+      caption: { letterSpacing: 0.2 },
     },
     components: {
       MuiPaper: { styleOverrides: { root: { backgroundImage: 'none' } } },
-      MuiButton: { defaultProps: { disableElevation: true } },
+      MuiButton: {
+        defaultProps: { disableElevation: true },
+        styleOverrides: { root: { borderRadius: 999 }, sizeLarge: { paddingTop: 10, paddingBottom: 10 } },
+      },
+      MuiToggleButtonGroup: { styleOverrides: { root: { borderRadius: 999 } } },
+      MuiToggleButton: { styleOverrides: { root: { borderRadius: 999, textTransform: 'none' } } },
       MuiTooltip: { defaultProps: { arrow: true } },
       MuiTextField: { defaultProps: { size: 'small' } },
       MuiSelect: { defaultProps: { size: 'small' } },
+      MuiOutlinedInput: { styleOverrides: { root: { borderRadius: 10 } } },
       MuiChip: { styleOverrides: { root: { fontWeight: 500 } } },
+      MuiMenu: { styleOverrides: { paper: { borderRadius: 12 } } },
+      MuiPopover: { styleOverrides: { paper: { borderRadius: 16 } } },
+      MuiDialog: { styleOverrides: { paper: { borderRadius: 20 } } },
+      MuiAlert: { styleOverrides: { root: { borderRadius: 12 } } },
     },
   })
 }

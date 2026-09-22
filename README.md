@@ -5,16 +5,16 @@ ships with it)
 
 A browser studio for building, running and **watching** multi-agent swarms.
 
-Draw the agents. Say who is allowed to speak to whom. Pick a model and a system prompt per agent.
-Press Run, and watch the conversation travel through the graph as it happens — nodes light up while
-they think, messages slide along the links they are actually sent on, the transcript fills in live.
+**Describe the swarm you want.** That is the first screen: a model writes the graph — agents, links,
+gates, memory — and it lands on the canvas. Press Run, and watch the conversation travel through the
+graph as it happens — nodes light up while they think, messages slide along the links they are
+actually sent on, the transcript fills in live. Nothing to drag, unless you want to.
 
-It is also a graph-engineering workbench: conditional branches, joins, human approval gates, shared
-memory between agents, reusable blocks that can contain themselves, agents that spawn other agents
-live on the canvas, and typed **decision models** (TypeSafe's Jev) that route in one cheap call and
-escalate to an LLM only when unsure.
-
-Or skip the clicking: **describe the swarm you want**, and a model writes the graph.
+Or build it by hand: draw the agents, say who is allowed to speak to whom, pick a model and a system
+prompt per agent. It is a graph-engineering workbench too: conditional branches, joins, human
+approval gates, shared memory between agents, reusable blocks that can contain themselves, agents
+that spawn other agents live on the canvas, and typed **decision models** (TypeSafe's Jev) that
+route in one cheap call and escalate to an LLM only when unsure.
 
 No backend, no build step to deploy, no account. A demo provider ships with the app, so the whole
 thing is usable — and demoable — with no API key at all.
@@ -29,7 +29,7 @@ order. This app makes the shape the primary object, and the run a thing you can 
 
 | | |
 | --- | --- |
-| **Prompt the graph** | Describe the swarm in a sentence (*"a support triage where anything unsure escalates to a senior agent"*) and a model writes it, streamed, in the same JSON format as Share. It goes through the same reader, plus an audit of anything the reader would have dropped, gets one automatic repair if it does not load, and lands as a single undo step — or nothing lands and the error says why. **Edit current** sends the swarm with the change to make and keeps every id. Uses the provider and model you already configured; with no key, a demo generator picks a matching preset and says so. |
+| **Prompt the graph** | The front door of the app, and a command bar under the canvas once a graph exists (`Ctrl/⌘ + K` brings the full card back). Describe the swarm in a sentence (*"a support triage where anything unsure escalates to a senior agent"*) — or pick one of the example chips — and a model writes it, streamed, in the same JSON format as Share. It goes through the same reader, plus an audit of anything the reader would have dropped, gets one automatic repair if it does not load, and lands as a single undo step — or nothing lands and the error says why. **Edit current** sends the swarm with the change to make and keeps every id. Uses the provider and model you already configured; with no key, a demo generator picks a matching preset and says so. |
 | **Route with a decision model** | A **Decision** node asks a typed decision model — TypeSafe's **Jev** and the models like it — `choice`, yes/no and `score` questions about what reached it. No text is generated: it forwards the message with typed answers (choice, probabilities, confidence) that link conditions route on (`route.choice = billing`, `route.confidence < 0.6`). A *default* link catches everything else, which is the System 1 → System 2 pattern: cheap routing when sure, an LLM when not. The node shows its answer and a probability bar per option. Through OpenRouter's decisions endpoint with your OpenRouter key, or TypeSafe's API through a relay; a demo decider runs it with no key. |
 | **Build a topology** | Drag agents around; drag from a node's right dot to another node's left dot to grant "may speak to". Links are directed, so hierarchies, rings and meshes are all expressible. |
 | **Configure each agent** | Provider, model (free text — a new model release needs no code change), system prompt, temperature, colour. |
@@ -43,7 +43,17 @@ order. This app makes the shape the primary object, and the run a thing you can 
 | **Watch it run** | Per-node status and a live tail of the text being produced, an animated packet on every link that carries a message, a colour-matched transcript, round and token counters. |
 | **Share a configuration** | Copy the whole swarm, or just the agents you ticked, as JSON. Paste it into someone else's Swarm Studio and they get your setup — `Ctrl/⌘ + C`, `X` and `V` work on the canvas too, so cutting an agent puts it on the clipboard on its way out. API keys and endpoint URLs deliberately never travel. Format: [`docs/format.md`](docs/format.md). |
 | **Export** | Download the swarm as JSON, in the same documented shape. |
-| **Use it on a phone** | Below 900px the graph keeps the whole screen and the three panels become bottom sheets, with Run always one tap away. Pinch to zoom, drag to pan, and the connect dots grow on touch pointers. |
+| **Use it on a phone** | Below 900px the graph keeps the whole screen, the prompt is a strip above the navigation, and the three panels become bottom sheets, with Run always one tap away. Pinch to zoom, drag to pan, and the connect dots grow on touch pointers. |
+
+## The interface
+
+One primary action at a time. The first screen is the prompt card; once a graph is on the canvas
+the card folds into a **command bar** at the bottom — describe a new swarm or a change on the left,
+**Run** on the right, with the task, topology and budgets behind one *Task* button. Manual editing
+lives in two side panels that stay closed until asked: **Build** (the roster and the inspector,
+opens when you click a node or the people icon) and **Transcript** (opens by itself when a run
+starts). Everything else — share, export, shortcuts, theme, source — sits in the ⋮ menu, and the
+API keys behind the key icon. The node palette floats at the top-left of the canvas.
 
 ## Providers
 
@@ -130,9 +140,9 @@ src/
     portable.ts         the interchange format
     decisions.ts        decision models (Jev): request, strict answer parsing, the demo decider
     graphPrompt.ts      prompt the graph: the generator's prompt, validation, repair, edit ids
-  components/           TopBar · Inspector · NodeInspector · GraphCanvas · AgentNode · FlowNodes ·
-                        MessageEdge · TranscriptPanel · MemoryPanel · BlockLibrary · GateDialog · RunBar ·
-                        GraphPromptDialog
+  components/           PromptComposer (the card, the command bar, the phone strip) · useGraphComposer ·
+                        TopBar · Inspector · NodeInspector · GraphCanvas · AgentNode · FlowNodes ·
+                        MessageEdge · TranscriptPanel · MemoryPanel · BlockLibrary · GateDialog · RunBar
 ```
 
 ## Stack
