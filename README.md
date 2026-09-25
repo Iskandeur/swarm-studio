@@ -91,8 +91,20 @@ The first start downloads the weights (about 0.8 GB for English, 0.65 GB for mul
 CPU the English checkpoint took about 2.3 GB of RAM and 2.5 to 3 s per call on two cores; both
 checkpoints together did not fit in 3 GB, so on a small machine start it with
 `LAYA_MODELS=english`. Checked from the published page in Chromium 124: the call goes through with
-the script and fails with plain `laya-serve`. Recent Chrome may first ask your permission to reach
-devices on your local network.
+the script and fails with plain `laya-serve`.
+
+From the published page, your browser also has a say, because a public site is reaching into your
+machine (checked on 2026-09-25 in Chrome 153, Firefox 155 and WebKit 26.6):
+
+- **Chrome, Edge, Brave**: on the first call a prompt asks to let the page *access other apps and
+  services on this device*. Allow it; the call waits for your answer. After a Block, re-allow it in
+  the site settings (the icon left of the address, *Apps on device*).
+- **Firefox**: the same kind of prompt, being rolled out since Firefox 151.
+- **Safari**: it never lets an https page call `http://127.0.0.1`, and has no prompt to answer. Use
+  another browser, or run Swarm Studio locally (`npm run dev`), where none of this applies.
+
+When a call to a local server fails, the run's error says which of these it most likely is. The
+same goes for a **Custom** chat provider pointed at Ollama or LM Studio on `localhost`.
 
 Before trusting a threshold: Laya's `confidence` is the same kind of number as Jev's (how
 concentrated the probabilities are, not the chance of being right). On the Triage preset's

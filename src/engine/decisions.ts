@@ -35,6 +35,7 @@ import type {
   DecisionQuestionType,
   KeyId,
 } from '../types.ts'
+import { fetchLocalAware } from './localServer.ts'
 
 export interface DecisionProviderInfo {
   id: DecisionProviderId
@@ -85,7 +86,7 @@ export const DECISION_PROVIDERS: DecisionProviderInfo[] = [
     keyLabel: 'Laya server key (only if you set LAYA_API_KEY)',
     keyOptional: true,
     models: ['auto', 'english', 'multilingual', 'typed-decisions'],
-    hint: 'Runs on your own machine: $0 a call, and the message never leaves it. Start it with tools/laya-serve-cors.py. Its confidence is not the chance of being right: pick escalation thresholds from your own messages.',
+    hint: 'Runs on your own machine: $0 a call, and the message never leaves it. Start it with tools/laya-serve-cors.py; on the first call your browser asks to let this page access apps on this device: Allow (Safari cannot, run Swarm Studio locally there). Its confidence is not the chance of being right: pick escalation thresholds from your own messages.',
   },
 ]
 
@@ -312,12 +313,11 @@ export async function callDecision(call: DecisionCall): Promise<DecisionResult> 
     headers['HTTP-Referer'] = typeof location !== 'undefined' ? location.origin : 'https://github.com/Iskandeur/swarm-studio'
     headers['X-Title'] = 'Swarm Studio'
   }
-  const res = await fetch(call.endpoint, {
-    method: 'POST',
-    signal: call.signal,
-    headers,
-    body: JSON.stringify(buildDecisionBody(call.node, call.state)),
-  })
+  const res = await fetchLocalAware(
+    call.endpoint,
+    { method: 'POST', signal: call.signal, headers, body: JSON.stringify(buildDecisionBody(call.node, call.state)) },
+    call.node.provider === 'laya' ? 'tools/laya-serve-cors.py' : undefined,
+  )
   const text = await res.text().catch(() => '')
   let json: unknown
   try {
