@@ -17,6 +17,12 @@
  * to any origin — verified with a preflight from the Pages origin) and against TypeSafe's own
  * `/v1/systemone`, which refuses browser origins: it needs a relay of your own in the endpoint field.
  *
+ * Laya (ConvAI Innovations, Apache-2.0) is an open-weight model of the same kind. Its server,
+ * laya-serve, answers the same `/v1/systemone` request on your own machine, with no key unless you
+ * set one, but sends no CORS headers: `tools/laya-serve-cors.py` runs it with them. Its `model`
+ * field names a checkpoint (`english`, `multilingual`, `typed-decisions`); anything else, `auto`
+ * included, lets its router pick by language.
+ *
  * The parser is strict on purpose. An answer with no usable choice is an ERROR the run reports, never a
  * default: a silent 0.5 would route a message as if the model had been unsure, when it said nothing.
  */
@@ -37,12 +43,14 @@ export interface DecisionProviderInfo {
   keyId?: KeyId
   keyLabel: string
   keyUrl?: string
+  /** The call works without a key (a local server with no auth); the key is sent only when set. */
+  keyOptional?: boolean
   models: string[]
   hint?: string
 }
 
 export const DECISION_TYPES: DecisionQuestionType[] = ['choice', 'noul', 'score']
-export const DECISION_PROVIDER_IDS: DecisionProviderId[] = ['mock', 'openrouter', 'typesafe']
+export const DECISION_PROVIDER_IDS: DecisionProviderId[] = ['mock', 'openrouter', 'typesafe', 'laya']
 
 export const DECISION_PROVIDERS: DecisionProviderInfo[] = [
   {
@@ -70,12 +78,22 @@ export const DECISION_PROVIDERS: DecisionProviderInfo[] = [
     models: ['jev-latest'],
     hint: 'TypeSafe refuses calls from a web page (CORS). Put a relay of your own in the endpoint field, or use OpenRouter.',
   },
+  {
+    id: 'laya',
+    label: 'Laya (local, open weights)',
+    keyId: 'laya',
+    keyLabel: 'Laya server key (only if you set LAYA_API_KEY)',
+    keyOptional: true,
+    models: ['auto', 'english', 'multilingual', 'typed-decisions'],
+    hint: 'Runs on your own machine: $0 a call, and the message never leaves it. Start it with tools/laya-serve-cors.py. Its confidence is not the chance of being right: pick escalation thresholds from your own messages.',
+  },
 ]
 
 export const DEFAULT_DECISION_ENDPOINTS: Record<DecisionProviderId, string> = {
   mock: '',
   openrouter: 'https://openrouter.ai/api/alpha/decisions',
   typesafe: 'https://api.typesafe.ai/v1/systemone',
+  laya: 'http://127.0.0.1:8000/v1/systemone',
 }
 
 export type DecisionEndpoints = Partial<Record<DecisionProviderId, string>>
@@ -284,12 +302,11 @@ export async function callDecision(call: DecisionCall): Promise<DecisionResult> 
   if (call.node.provider === 'mock') return demoDecision(call)
   if (!call.node.model.trim()) throw new Error('no decision model set')
   if (!call.endpoint) throw new Error('no endpoint URL set for this decision provider — open Settings')
-  if (!call.apiKey) throw new Error(`no ${decisionProviderInfo(call.node.provider).label} key — open Settings`)
+  const info = decisionProviderInfo(call.node.provider)
+  if (!call.apiKey && !info.keyOptional) throw new Error(`no ${info.label} key — open Settings`)
 
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-    authorization: `Bearer ${call.apiKey}`,
-  }
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  if (call.apiKey) headers.authorization = `Bearer ${call.apiKey}`
   if (call.node.provider === 'openrouter') {
     // Both are in OpenRouter's CORS allow-list; they attribute the traffic to the app.
     headers['HTTP-Referer'] = typeof location !== 'undefined' ? location.origin : 'https://github.com/Iskandeur/swarm-studio'

@@ -349,7 +349,10 @@ that call, placed in the graph:
   Pages origin, and with a real call). `typesafe` calls TypeSafe's own `/v1/systemone` with a
   TypeSafe key, same request shape — but that API refuses browser origins, so from the published
   site it needs a relay of your own in its endpoint field, like any gateway that does not allow the
-  page. `mock` is the demo decider: it weighs each option by the words it shares with the message,
+  page. `laya` calls an open-weight model on your own machine (`http://127.0.0.1:8000/v1/systemone`
+  by default), with no key unless the server was started with one; `laya-serve` sends no CORS
+  headers, so `tools/laya-serve-cors.py` runs it with them (checked in Chromium from the Pages
+  origin: plain `laya-serve` fails, the script goes through). `mock` is the demo decider: it weighs each option by the words it shares with the message,
   deterministic and labelled demo, so the preset runs with no key. The model field is free text, so a
   new decision model is a new string, not new code.
 - **Callback.** `onDecision({ path, nodeId, answers })`, which the store keeps per node for the bars.

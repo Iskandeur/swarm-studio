@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DecisionNode, DecisionQuestion } from '../types.ts'
 import { PRESETS } from '../presets.ts'
 import {
+  DECISION_PROVIDERS,
   buildDecisionBody,
   callDecision,
   decisionKey,
@@ -50,6 +51,28 @@ const REAL = {
   usage: { input_tokens: 404, output_tokens: 68, cost: 0.000016968 },
   id: 'gen-dec-x',
   provider: 'TypeSafe',
+}
+
+/**
+ * Captured from laya-serve 0.3.20 (tools/laya-serve-cors.py, CPU), sent the Triage preset's two
+ * questions and its task. Laya adds `answer_confidence`, `action` and `routing`, which the reader
+ * ignores: guards read `confidence`, the same field as Jev's.
+ */
+const REAL_LAYA = {
+  model: 'laya-rl-agent',
+  answers: {
+    route: {
+      type: 'choice',
+      choice: 'billing',
+      probabilities: { billing: 0.9403, technical: 0.0518, account: 0.0079 },
+      confidence: 0.773,
+      answer_confidence: 0.9403,
+      action: { act_probability: 1 },
+    },
+    blocked: { type: 'noul', noul: 0.623, confidence: 0.623, answer_confidence: 0.623, action: { act_probability: 1 } },
+  },
+  usage: { input_tokens: 139, output_tokens: 0 },
+  routing: { model: 'english', repo: 'convaiinnovations/laya', reason: 'English Latin text' },
 }
 
 const clone = <T>(v: T): T => structuredClone(v)
@@ -309,6 +332,41 @@ describe('callDecision', () => {
     expect('X-Title' in headers).toBe(false)
   })
 
+  it('calls a local Laya server with no key and no Authorization header, and reads its answers', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => reply(200, REAL_LAYA))
+    vi.stubGlobal('fetch', fetchMock)
+    const triage = PRESETS.find((p) => p.name === 'Triage (System 1 → System 2)')!
+    const questions = triage.nodes!.find((n): n is DecisionNode => n.kind === 'decision')!.questions
+    const result = await callDecision({
+      node: { provider: 'laya', model: 'auto', questions },
+      state: triage.task,
+      apiKey: '',
+      endpoint: resolveDecisionEndpoint('laya'),
+      signal: signal(),
+    })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://127.0.0.1:8000/v1/systemone')
+    const headers = init.headers as Record<string, string>
+    expect('authorization' in headers).toBe(false)
+    expect('X-Title' in headers).toBe(false)
+    expect(result.answers.route).toEqual({
+      type: 'choice',
+      choice: 'billing',
+      confidence: 0.773,
+      probabilities: { billing: 0.9403, technical: 0.0518, account: 0.0079 },
+    })
+    expect(result.answers.blocked).toEqual({ type: 'noul', noul: 0.623, yes: true })
+    expect(result.tokensIn).toBe(139)
+    expect(result.cost).toBeUndefined()
+  })
+
+  it('sends a Laya key only when one is set', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => reply(200, REAL))
+    vi.stubGlobal('fetch', fetchMock)
+    await callDecision({ node: node('laya'), state: 's', apiKey: 'lk', endpoint: 'http://127.0.0.1:8000/v1/systemone', signal: signal() })
+    expect((fetchMock.mock.calls[0][1].headers as Record<string, string>).authorization).toBe('Bearer lk')
+  })
+
   it('reports HTTP 401 with the API message', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => reply(401, { error: { message: 'No auth credentials found' } })))
     await expect(
@@ -399,6 +457,12 @@ describe('keys and endpoints', () => {
     expect(decisionKey('typesafe', keys)).toBe('ts-key')
     expect(decisionKey('mock', keys)).toBe('')
     expect(decisionKey('typesafe', {})).toBe('')
+    expect(decisionKey('laya', { laya: ' lk ' })).toBe('lk')
+    expect(decisionKey('laya', keys)).toBe('')
+  })
+
+  it('only Laya works without a key', () => {
+    expect(DECISION_PROVIDERS.filter((p) => p.keyOptional).map((p) => p.id)).toEqual(['laya'])
   })
 
   it('resolveDecisionEndpoint prefers an override, else the default', () => {
@@ -406,5 +470,6 @@ describe('keys and endpoints', () => {
     expect(resolveDecisionEndpoint('typesafe', { typesafe: ' https://relay.example ' })).toBe('https://relay.example')
     expect(resolveDecisionEndpoint('typesafe', { typesafe: '  ' })).toBe('https://api.typesafe.ai/v1/systemone')
     expect(resolveDecisionEndpoint('mock')).toBe('')
+    expect(resolveDecisionEndpoint('laya')).toBe('http://127.0.0.1:8000/v1/systemone')
   })
 })

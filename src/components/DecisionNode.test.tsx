@@ -120,6 +120,20 @@ test('switching to OpenRouter picks its model, and warns while the key is missin
   assert.ok(screen.getByText(/add it in settings/i))
 })
 
+test('switching to Laya picks the router, and asks for no key', () => {
+  const id = decisionNode().id
+  render(<NodeInspector nodeId={id} />)
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: /decision provider/i }))
+  fireEvent.click(screen.getByRole('option', { name: 'Laya (local, open weights)' }))
+  assert.equal(decisionNode().provider, 'laya')
+  assert.equal(decisionNode().model, 'auto')
+  assert.equal(screen.queryByText(/add it in settings/i), null)
+  assert.ok(screen.getByText(/tools\/laya-serve-cors\.py/))
+  cleanup()
+  mount({ node: decisionNode() })
+  assert.match(screen.getByRole('group', { name: 'Decision: Triage' }).textContent ?? '', /Laya auto · no text generated/)
+})
+
 test('a link out of a decision offers its answers as condition paths, and explains the default branch', () => {
   render(<LinkInspector linkId="d4" />)
   assert.ok(screen.getByText(/taken only when no other link out of this decision node matches/i))

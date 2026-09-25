@@ -558,7 +558,7 @@ function DecisionSection({ node }: { node: DecisionNode }) {
   const questions = Array.isArray(node.questions) ? node.questions : []
   const info = decisionProviderInfo(node.provider)
   const problems = questionProblems(questions)
-  const missingKey = node.provider !== 'mock' && decisionKey(node.provider, keys) === ''
+  const missingKey = node.provider !== 'mock' && !info.keyOptional && decisionKey(node.provider, keys) === ''
   const setQuestions = (next: DecisionQuestion[]) => updateNode(node.id, { questions: next })
   const put = (index: number, next: DecisionQuestion) => setQuestions(questions.map((q, i) => (i === index ? next : q)))
 

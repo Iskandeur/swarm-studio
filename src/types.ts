@@ -11,10 +11,10 @@ export type ProviderId = 'mock' | 'openai' | 'anthropic' | 'openrouter' | 'custo
  * Where a Decision node sends its typed questions. Not a chat provider: these models answer
  * `choice` / `noul` / `score` questions about a state and never write text (docs/graph-engineering.md §Decision).
  */
-export type DecisionProviderId = 'mock' | 'openrouter' | 'typesafe'
+export type DecisionProviderId = 'mock' | 'openrouter' | 'typesafe' | 'laya'
 
-/** Every key slot this browser keeps. TypeSafe's own key is the one slot no chat provider uses. */
-export type KeyId = ProviderId | 'typesafe'
+/** Every key slot this browser keeps. TypeSafe's and Laya's are the slots no chat provider uses. */
+export type KeyId = ProviderId | 'typesafe' | 'laya'
 
 /** How a speaking turn is handed to the agents an agent points at. */
 export type Topology =

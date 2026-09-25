@@ -174,8 +174,8 @@ answers attached, and the guards on its outgoing links read them with the `decis
 
 | Field | Meaning |
 | --- | --- |
-| `provider` | `mock` (the demo decider, no key), `openrouter` (OpenRouter's `/api/alpha/decisions`, with the OpenRouter key) or `typesafe` (TypeSafe's own `/v1/systemone`, with a TypeSafe key). |
-| `model` | Free text. `typesafe/jev-1.13` on OpenRouter, `jev-latest` on TypeSafe. |
+| `provider` | `mock` (the demo decider, no key), `openrouter` (OpenRouter's `/api/alpha/decisions`, with the OpenRouter key), `typesafe` (TypeSafe's own `/v1/systemone`, with a TypeSafe key) or `laya` (Laya's `/v1/systemone` on your own machine, no key by default). |
+| `model` | Free text. `typesafe/jev-1.13` on OpenRouter, `jev-latest` on TypeSafe; on Laya a checkpoint (`english`, `multilingual`, `typed-decisions`), or `auto` to let it choose by language. |
 | `questions[].name` | One word; the key its answer comes back under, and the first segment of a guard path. |
 | `questions[].type` | `choice`: pick one of `options` (≥ 2). `noul`: yes or no; `options` may describe `true` and `false`. `score`: a level on `levels` (≥ 2, lowest first). |
 
