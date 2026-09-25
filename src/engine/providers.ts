@@ -6,6 +6,7 @@
  * There is no backend in this project, on purpose — nothing to host, nothing to trust.
  */
 import type { ProviderId } from '../types.ts'
+import { fetchLocalAware } from './localServer.ts'
 
 export interface ChatMessage {
   role: 'user' | 'assistant'
@@ -177,7 +178,7 @@ export async function listModels(
   } else if (opts.apiKey) {
     headers.authorization = `Bearer ${opts.apiKey}`
   }
-  const res = await fetch(modelsUrlFrom(opts.endpoint), { headers, signal: opts.signal })
+  const res = await fetchLocalAware(modelsUrlFrom(opts.endpoint), { headers, signal: opts.signal })
   if (!res.ok) await failure(res)
   return parseModelList(await res.json())
 }
@@ -278,7 +279,7 @@ async function chatCompletions(
   const memo = `${providerId}:${req.model}`
   const sendTemperature = !REJECTS_TEMPERATURE.has(memo)
 
-  const res = await fetch(req.endpoint, {
+  const res = await fetchLocalAware(req.endpoint, {
     method: 'POST',
     signal: req.signal,
     headers: {

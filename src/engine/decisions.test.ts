@@ -322,6 +322,15 @@ describe('callDecision', () => {
     expect(result.answers.route).toMatchObject({ choice: 'billing', confidence: 1 })
   })
 
+  it('a Laya call that never reached the server says how to start it, from the published page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+    vi.stubGlobal('location', new URL('https://iskandeur.github.io/swarm-studio/'))
+    vi.stubGlobal('navigator', { permissions: { query: vi.fn(async () => ({ state: 'prompt' })) } })
+    await expect(
+      callDecision({ node: { ...node('laya'), model: 'auto' }, state: 's', apiKey: '', endpoint: 'http://127.0.0.1:8000/v1/systemone', signal: signal() }),
+    ).rejects.toThrow(/Failed to fetch: the call to http:\/\/127\.0\.0\.1:8000 failed before any answer\. Is tools\/laya-serve-cors\.py running\?/)
+  })
+
   it('sends no OpenRouter headers to TypeSafe', async () => {
     const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => reply(200, REAL))
     vi.stubGlobal('fetch', fetchMock)

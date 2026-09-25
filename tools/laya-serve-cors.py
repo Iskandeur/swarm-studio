@@ -43,8 +43,9 @@ def origins():
 class PrivateNetworkAccess:
     """Answers Chrome's Private Network Access preflight (a public page calling 127.0.0.1).
 
-    Chrome sends `Access-Control-Request-Private-Network: true` on the preflight and wants the same
-    word back; newer versions ask the user instead. The header is harmless where it is not needed.
+    Older Chromium sent `Access-Control-Request-Private-Network: true` on the preflight and wanted the
+    same word back. Chrome 142+ asks the user instead (Local Network Access) and no longer sends it:
+    Chrome 153 did not, on 2026-09-25. The answer is kept for older browsers, harmless elsewhere.
     """
 
     def __init__(self, app):
