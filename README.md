@@ -13,8 +13,9 @@ actually sent on, the transcript fills in live. Nothing to drag, unless you want
 Or build it by hand: draw the agents, say who is allowed to speak to whom, pick a model and a system
 prompt per agent. It is a graph-engineering workbench too: conditional branches, joins, human
 approval gates, shared memory between agents, reusable blocks that can contain themselves, agents
-that spawn other agents live on the canvas, and typed **decision models** (TypeSafe's Jev) that
-route in one cheap call and escalate to an LLM only when unsure.
+that spawn other agents live on the canvas, and typed **decision models** (TypeSafe's Jev, or the
+open-weight Laya on your own machine) that route in one cheap call and escalate to an LLM only when
+unsure.
 
 No backend, no build step to deploy, no account. A demo provider ships with the app, so the whole
 thing is usable — and demoable — with no API key at all.
@@ -30,7 +31,7 @@ order. This app makes the shape the primary object, and the run a thing you can 
 | | |
 | --- | --- |
 | **Prompt the graph** | The front door of the app, and a command bar under the canvas once a graph exists (`Ctrl/⌘ + K` brings the full card back). Describe the swarm in a sentence (*"a support triage where anything unsure escalates to a senior agent"*) — or pick one of the example chips — and a model writes it, streamed, in the same JSON format as Share. It goes through the same reader, plus an audit of anything the reader would have dropped, gets one automatic repair if it does not load, and lands as a single undo step — or nothing lands and the error says why. **Edit current** sends the swarm with the change to make and keeps every id. Uses the provider and model you already configured; with no key, a demo generator picks a matching preset and says so. |
-| **Route with a decision model** | A **Decision** node asks a typed decision model — TypeSafe's **Jev** and the models like it — `choice`, yes/no and `score` questions about what reached it. No text is generated: it forwards the message with typed answers (choice, probabilities, confidence) that link conditions route on (`route.choice = billing`, `route.confidence < 0.6`). A *default* link catches everything else, which is the System 1 → System 2 pattern: cheap routing when sure, an LLM when not. The node shows its answer and a probability bar per option. Through OpenRouter's decisions endpoint with your OpenRouter key, or TypeSafe's API through a relay; a demo decider runs it with no key. |
+| **Route with a decision model** | A **Decision** node asks a typed decision model — TypeSafe's **Jev** and the models like it, **Laya** included — `choice`, yes/no and `score` questions about what reached it. No text is generated: it forwards the message with typed answers (choice, probabilities, confidence) that link conditions route on (`route.choice = billing`, `route.confidence < 0.6`). A *default* link catches everything else, which is the System 1 → System 2 pattern: cheap routing when sure, an LLM when not. The node shows its answer and a probability bar per option. Through OpenRouter's decisions endpoint with your OpenRouter key, or TypeSafe's API through a relay; a demo decider runs it with no key. |
 | **Build a topology** | Drag agents around; drag from a node's right dot to another node's left dot to grant "may speak to". Links are directed, so hierarchies, rings and meshes are all expressible. |
 | **Configure each agent** | Provider, model (free text — a new model release needs no code change), system prompt, temperature, colour. |
 | **Choose a propagation rule** | `Broadcast` — every outgoing link carries the message. `Round-robin` — one link per turn, rotating. `Manager` — the entry agent delegates, workers report back, the manager speaks again with every reply in hand. |
@@ -72,6 +73,35 @@ Decision nodes have their own providers, in the same dialog:
 | **Demo decider** | no | Weighs each option by the words it shares with the message. Deterministic, badged `demo`. |
 | **OpenRouter decisions** | the OpenRouter key | `/api/alpha/decisions`, model `typesafe/jev-1.13`. Callable straight from the browser. |
 | **TypeSafe** | a TypeSafe key | `/v1/systemone`, same request. TypeSafe's API refuses browser origins, so from the published site it needs a relay of yours in its Endpoint URL field. |
+| **Laya (local, open weights)** | none by default | [Laya](https://huggingface.co/convaiinnovations/laya) (ConvAI Innovations, Apache-2.0) on your own machine: `$0` a call, and the message never leaves it. Same `/v1/systemone` request. Model `auto` lets Laya pick its English or multilingual checkpoint by language; `english`, `multilingual` or `typed-decisions` pins one. See below. |
+
+#### Laya on your machine
+
+Laya's own server, `laya-serve`, sends no CORS headers, so a web page cannot read its answers.
+[`tools/laya-serve-cors.py`](tools/laya-serve-cors.py) runs the same server with CORS open to this
+site and to `npm run dev`, bound to `127.0.0.1`:
+
+```bash
+pip install "laya[serve]"
+python tools/laya-serve-cors.py     # http://127.0.0.1:8000/v1/systemone, the default endpoint
+```
+
+Then pick **Laya** as a Decision node's provider; no key is needed unless you set `LAYA_API_KEY`.
+The first start downloads the weights (about 0.8 GB for English, 0.65 GB for multilingual). On a
+CPU the English checkpoint took about 2.3 GB of RAM and 2.5 to 3 s per call on two cores; both
+checkpoints together did not fit in 3 GB, so on a small machine start it with
+`LAYA_MODELS=english`. Checked from the published page in Chromium 124: the call goes through with
+the script and fails with plain `laya-serve`. Recent Chrome may first ask your permission to reach
+devices on your local network.
+
+Before trusting a threshold: Laya's `confidence` is the same kind of number as Jev's (how
+concentrated the probabilities are, not the chance of being right). On the Triage preset's
+ambiguous message (a double charge *and* a crash) it answered `billing` with confidence 0.77 and
+94% of the probability, so at the preset's 0.6 threshold it does not escalate; on "I forgot my
+password" it answered `account`, rightly, with confidence 0.26. Its runtime also warns that its
+confidence on choices with 11 options or more is uncalibrated. How it compares with Jev on a real
+task:
+[system1-system2, section 5](https://github.com/Iskandeur/system1-system2#5-open-weight-system-1-run-locally-on-cpu).
 
 **Every** provider's endpoint URL is overridable in Providers, so routing an agent through a mirror,
 a gateway or a proxy never needs a code change. *Test and list models* calls the endpoint's `/models`
@@ -138,7 +168,7 @@ src/
     memory.ts           shared memory: writes, and what a reader sees
     graph.ts            reading a v1 or v2 graph the same way
     portable.ts         the interchange format
-    decisions.ts        decision models (Jev): request, strict answer parsing, the demo decider
+    decisions.ts        decision models (Jev, Laya): request, strict answer parsing, the demo decider
     graphPrompt.ts      prompt the graph: the generator's prompt, validation, repair, edit ids
   components/           PromptComposer (the card, the command bar, the phone strip) · useGraphComposer ·
                         TopBar · Inspector · NodeInspector · GraphCanvas · AgentNode · FlowNodes ·

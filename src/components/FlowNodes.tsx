@@ -103,7 +103,16 @@ export function FlowNodeView({ id, data, selected }: NodeProps<FlowFlowNode>): J
     case 'block':
       return <BlockShape shell={shell} name={node.name} blockId={node.blockId} />
     case 'decision':
-      return <DecisionShape shell={shell} name={node.name} model={node.model} demo={node.provider === 'mock'} questions={node.questions ?? []} />
+      return (
+        <DecisionShape
+          shell={shell}
+          name={node.name}
+          // Laya's model field names a checkpoint ("auto", "english"), which says nothing on its own.
+          model={node.provider === 'laya' ? `Laya ${node.model}`.trim() : node.model}
+          demo={node.provider === 'mock'}
+          questions={node.questions ?? []}
+        />
+      )
     default:
       // A pasted spec from a newer version could carry a kind this build does not know. Throwing here
       // would blank the whole canvas; a plain card keeps the node visible, linkable and deletable.

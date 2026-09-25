@@ -174,7 +174,9 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                 helperText={
                   provider.id === 'typesafe'
                     ? 'Empty = TypeSafe’s own API, which a browser page cannot call. Put a relay of your own here.'
-                    : 'Leave empty for the official endpoint.'
+                    : provider.id === 'laya'
+                      ? 'Empty = Laya on this computer, port 8000, started with tools/laya-serve-cors.py (plain laya-serve sends no CORS headers).'
+                      : 'Leave empty for the official endpoint.'
                 }
               />
               {provider.keyId === 'openrouter' ? (
@@ -194,6 +196,8 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                       <Link href={provider.keyUrl} target="_blank" rel="noreferrer" underline="hover">
                         get a key
                       </Link>
+                    ) : provider.keyOptional ? (
+                      'Leave empty unless you started the server with a key.'
                     ) : undefined
                   }
                 />
@@ -216,6 +220,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           onClick={() => {
             PROVIDERS.forEach((p) => p.keyLabel && setKey(p.id, ''))
             setKey('typesafe', '')
+            setKey('laya', '')
           }}
         >
           Clear keys
