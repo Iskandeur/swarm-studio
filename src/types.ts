@@ -53,6 +53,30 @@ export interface Agent {
   dispatch?: Dispatch
   /** May create sub-agents during a run with `<spawn>`. */
   canSpawn?: boolean
+  /** Overrides the swarm's retry policy for this agent's calls (ADK's per-node `RetryConfig`). */
+  retry?: RetryPolicy
+  /**
+   * ADK's `output_key`: after each turn, the agent's answer (prose, tags stripped) is written under
+   * this key in every Memory node it may WRITE to. The graph grants the right, not this field.
+   */
+  outputKey?: string
+}
+
+/**
+ * How a failed model call is retried — ADK 2.0's `RetryConfig`, in milliseconds.
+ * Absent fields fall back to the swarm's policy, then to `DEFAULT_RETRY` (engine/retry.ts).
+ */
+export interface RetryPolicy {
+  /** Attempts including the first. 1 = no retry. */
+  maxAttempts?: number
+  initialDelayMs?: number
+  maxDelayMs?: number
+  /** Each retry waits this many times longer than the previous one. */
+  backoffFactor?: number
+  /** 0 = exact delays; 0.5 = up to ±25 % around each one. */
+  jitter?: number
+  /** `transient` (default): rate limits, 5xx, network drops only. `all`: any error. */
+  on?: 'transient' | 'all'
 }
 
 export type Comparison = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'contains'
@@ -195,6 +219,7 @@ export interface DecisionNode extends NodeBase {
   provider: DecisionProviderId
   model: string
   questions: DecisionQuestion[]
+  retry?: RetryPolicy
 }
 
 export type FlowNode = ConditionNode | JoinNode | OutputNode | HumanNode | MemoryNode | BlockNode | DecisionNode
@@ -230,6 +255,8 @@ export interface SwarmSpec extends Graph {
   maxSpawns?: number
   /** Block definitions travel with the swarm that uses them. */
   blocks?: BlockDef[]
+  /** Default retry policy for every model call of the run. */
+  retry?: RetryPolicy
 }
 
 export const DEFAULT_MAX_DEPTH = 3

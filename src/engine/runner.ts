@@ -49,6 +49,7 @@ import {
 } from './session.ts'
 import { parseActions, type Action, type SpawnAction, type WriteAction } from './actions.ts'
 import { evaluate } from './predicates.ts'
+import { resolveRetry, withRetry, type RetryHooks } from './retry.ts'
 import {
   callDecision,
   decisionKey,
@@ -179,6 +180,8 @@ export interface RunOptions {
   startFrom?: string[]
   /** Block definitions available besides the swarm's own (built-ins, this browser's library). */
   library?: BlockDef[]
+  /** How a retry waits. Tests pass an instant one; the default is an abortable timer. */
+  retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
 interface Packet {
@@ -243,6 +246,7 @@ interface Ctx {
   maxSpawns: number
   /** Agents told "queued" that have not reached a terminal status yet, with their path key. */
   queued: Map<string, { id: string; path: string[] }>
+  retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
 export async function runSwarm(
@@ -295,6 +299,7 @@ export async function runSwarm(
     maxDepth: spec.maxDepth ?? DEFAULT_MAX_DEPTH,
     maxSpawns: spec.maxSpawns ?? DEFAULT_MAX_SPAWNS,
     queued: new Map(),
+    retrySleep: options.retrySleep,
   }
 
   const level = createLevel(structuredClone(graphOf(spec)), [], 0, spec.task, session.graph)
@@ -1045,13 +1050,18 @@ async function runDecisionNode(
   ctx.queued.delete(queueKey(level, node.id))
 
   try {
-    const result = await callDecision({
-      node,
-      state,
-      apiKey: decisionKey(node.provider, ctx.keys),
-      endpoint: resolveDecisionEndpoint(node.provider, ctx.decisionEndpoints),
-      signal: ctx.inner.signal,
-    })
+    const result = await withRetry(
+      () =>
+        callDecision({
+          node,
+          state,
+          apiKey: decisionKey(node.provider, ctx.keys),
+          endpoint: resolveDecisionEndpoint(node.provider, ctx.decisionEndpoints),
+          signal: ctx.inner.signal,
+        }),
+      resolveRetry(ctx.spec.retry, node.retry),
+      retryHooks(ctx, node.name),
+    )
     const summary = summarizeDecision(result.answers)
     cb.onMessageEnd(entryId, {
       text: summary,
@@ -1240,7 +1250,16 @@ async function speak(ctx: Ctx, level: Level, agent: Agent, deliveries: Delivery[
 
   let firstDelta = true
   try {
-    const result = await callProvider(agent.provider, {
+    const hooks = retryHooks(ctx, agent.name)
+    const result = await withRetry(
+      (attempt) => {
+        // A retry starts a clean answer: what the failed attempt streamed must not prefix the new one.
+        if (attempt > 1) {
+          firstDelta = true
+          cb.onMessageReset?.(entryId)
+          cb.onAgentStatus(agent.id, 'thinking', pathArg(level.path))
+        }
+        return callProvider(agent.provider, {
       model: agent.model,
       system,
       messages,
@@ -1262,6 +1281,10 @@ async function speak(ctx: Ctx, level: Level, agent: Agent, deliveries: Delivery[
         cb.onMessageDelta(entryId, delta)
       },
     })
+      },
+      resolveRetry(ctx.spec.retry, agent.retry),
+      hooks,
+    )
     // The agent remembers what it actually wrote, tags included: it should know it already routed.
     level.state.memory.set(agent.id, [...messages, { role: 'assistant', content: result.text }])
     const parsed = parseActions(result.text)
@@ -1275,7 +1298,7 @@ async function speak(ctx: Ctx, level: Level, agent: Agent, deliveries: Delivery[
     })
     ctx.queued.delete(queueKey(level, agent.id))
     cb.onAgentStatus(agent.id, 'done', pathArg(level.path))
-    return { id: agent.id, name: agent.name, entryId, prose: parsed.prose, actions: parsed.actions }
+    return { id: agent.id, name: agent.name, entryId, prose: parsed.prose, actions: [...parsed.actions, ...outputKeyWrites(level, agent, parsed.prose)] }
   } catch (err) {
     // Stopped — either by the user, or by a sibling's failure winding the round down.
     // ⚠️ The text is NOT overwritten: whatever already streamed is the most interesting part of a
@@ -1295,6 +1318,28 @@ async function speak(ctx: Ctx, level: Level, agent: Agent, deliveries: Delivery[
     ctx.inner.abort()
     throw err
   }
+}
+
+function retryHooks(ctx: Ctx, who: string): RetryHooks {
+  return {
+    signal: ctx.inner.signal,
+    sleep: ctx.retrySleep,
+    onRetry: ({ attempt, maxAttempts, delayMs, error }) => {
+      const why = error instanceof Error ? error.message : String(error)
+      ctx.cb.onNotice?.(`${who}: ${why.slice(0, 160)} — retrying in ${(delayMs / 1000).toFixed(1)} s (attempt ${attempt}/${maxAttempts}).`)
+    },
+  }
+}
+
+/**
+ * ADK's `output_key`: the answer lands in shared state without the model having to write a tag.
+ * One write per Memory node the agent may write to; they go through the same path as a `<write>`
+ * tag, so permissions, versions, bus wake-ups and the transcript chips all apply unchanged.
+ */
+function outputKeyWrites(level: Level, agent: Agent, prose: string): WriteAction[] {
+  const key = agent.outputKey?.trim()
+  if (!key || !prose.trim()) return []
+  return writableMemories(level.graph, agent.id).map((node) => ({ type: 'write' as const, memory: node.name, key, value: prose }))
 }
 
 function nameOf(level: Level, id: string): string {

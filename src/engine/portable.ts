@@ -32,6 +32,7 @@ import type {
   MemoryEntry,
   MemoryMode,
   ProviderId,
+  RetryPolicy,
   SwarmSpec,
   Topology,
 } from '../types.ts'
@@ -63,6 +64,7 @@ export interface PortableSwarm {
   maxRounds: number
   maxDepth?: number
   maxSpawns?: number
+  retry?: RetryPolicy
   entryIds: string[]
   agents: Agent[]
   nodes: FlowNode[]
@@ -96,6 +98,7 @@ export function exportSwarm(spec: SwarmSpec): string {
     maxRounds: spec.maxRounds,
     ...(spec.maxDepth !== undefined ? { maxDepth: spec.maxDepth } : {}),
     ...(spec.maxSpawns !== undefined ? { maxSpawns: spec.maxSpawns } : {}),
+    ...(spec.retry !== undefined ? { retry: spec.retry } : {}),
     entryIds: spec.entryIds,
     agents: spec.agents,
     nodes: spec.nodes ?? [],
@@ -167,7 +170,27 @@ function readAgent(raw: unknown, index: number): Agent | string {
   if (maxTokens !== undefined && maxTokens >= 1) agent.maxTokens = Math.floor(maxTokens)
   if (DISPATCHES.includes(record.dispatch as Dispatch)) agent.dispatch = record.dispatch as Dispatch
   if (typeof record.canSpawn === 'boolean') agent.canSpawn = record.canSpawn
+  const retry = readRetry(record.retry)
+  if (retry) agent.retry = retry
+  const outputKey = asString(record.outputKey).trim().slice(0, 80)
+  if (outputKey) agent.outputKey = outputKey
   return agent
+}
+
+/**
+ * A retry policy, kept only for the fields it knows and only when they are numbers. The runner
+ * clamps the values (`resolveRetry`); the reader just refuses shapes that could not mean anything.
+ */
+export function readRetry(raw: unknown): RetryPolicy | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const record = raw as Record<string, unknown>
+  const policy: RetryPolicy = {}
+  for (const key of ['maxAttempts', 'initialDelayMs', 'maxDelayMs', 'backoffFactor', 'jitter'] as const) {
+    const value = asFinite(record[key])
+    if (value !== undefined && value >= 0) policy[key] = value
+  }
+  if (record.on === 'transient' || record.on === 'all') policy.on = record.on
+  return Object.keys(policy).length > 0 ? policy : undefined
 }
 
 function readSeed(raw: unknown): MemoryEntry[] {
@@ -284,6 +307,7 @@ function readFlowNode(raw: unknown, index: number): FlowNode | undefined {
         provider,
         model: asString(record.model) || decisionProviderInfo(provider).models[0],
         questions: readQuestions(record.questions),
+        ...(readRetry(record.retry) ? { retry: readRetry(record.retry) } : {}),
       }
     }
     case 'block': {
@@ -494,6 +518,7 @@ function readSwarmPayload(record: Record<string, unknown>): ParseResult {
       maxRounds: rounds !== undefined && rounds >= 1 ? Math.floor(rounds) : 4,
       ...(depth !== undefined && depth >= 0 ? { maxDepth: Math.min(8, Math.floor(depth)) } : {}),
       ...(spawns !== undefined && spawns >= 0 ? { maxSpawns: Math.min(100, Math.floor(spawns)) } : {}),
+      ...(readRetry(record.retry) ? { retry: readRetry(record.retry) } : {}),
       entryIds: readEntryIds(record.entryIds, known),
       ...parts,
       blocks: readBlocks(record.blocks),

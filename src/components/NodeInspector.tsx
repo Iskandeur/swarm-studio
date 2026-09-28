@@ -1011,6 +1011,29 @@ export function AgentGraphSettings({ agentId }: { agentId: string }): JSX.Elemen
         <Caption>It can create sub-agents or run a saved block for a subtask, within the swarm's depth and spawn limits.</Caption>
       </Box>
 
+      <TextField
+        label="Output key"
+        value={agent.outputKey ?? ''}
+        placeholder="None"
+        onChange={(e) => updateAgent(agent.id, { outputKey: e.target.value.trim() ? e.target.value : undefined })}
+        helperText="Each answer is also written under this key in every memory it may write to, no tag needed."
+        fullWidth
+      />
+
+      <NumberField
+        label="Attempts per call"
+        value={agent.retry?.maxAttempts}
+        min={1}
+        allowEmpty
+        placeholder="Swarm default (3)"
+        onChange={(next) => {
+          const { maxAttempts: _drop, ...rest } = agent.retry ?? {}
+          const retry = next === undefined ? rest : { ...rest, maxAttempts: next }
+          updateAgent(agent.id, { retry: Object.keys(retry).length ? retry : undefined })
+        }}
+        helperText="Rate limits, server errors and dropped connections are retried with a growing wait. A bad key is not."
+      />
+
       <Box>
         <Label>Memories · {memories.length}</Label>
         {memories.length === 0 ? (

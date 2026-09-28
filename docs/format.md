@@ -118,6 +118,8 @@ links. A version-1 export is simply a version-2 swarm that uses none of them.
 | `maxSpawns` | Helpers agents may create in one run. Default 12, at most 100. |
 | `agents[].dispatch` | `inherit` (the topology decides), `all`, `rotate`, or `choose` (the agent names a labelled link with `<route to="…"/>`). |
 | `agents[].canSpawn` | May create helpers with `<spawn>`. |
+| `agents[].outputKey` | Each answer is also written under this key in every memory the agent may write to. |
+| `retry`, `agents[].retry`, `nodes[].retry` (decision) | `{ maxAttempts, initialDelayMs, maxDelayMs, backoffFactor, jitter, on }`. Agent over swarm over default (3 attempts, 1 s, ×2, 30 s cap, jitter 0.5, `on: "transient"`). `on: "all"` also retries permanent errors. At most 10 attempts, 120 s per wait. |
 | `nodes[].kind` | `condition`, `join`, `output`, `human`, `memory`, `block` or `decision`. |
 | `links[].kind` | `message` (default) or `access`. An access link joins exactly one memory and one agent: agent → memory writes, memory → agent reads, `access: "readwrite"` both. |
 | `links[].label` | A branch name. `true`/`false` out of a condition, `approved`/`rejected` out of a human gate, anything for a `choose` agent. |

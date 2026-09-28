@@ -453,3 +453,55 @@ one browser reference (`window.location.origin` for the OpenRouter referer heade
 `providers.ts`) is guarded in phase 1 so it also runs where there is no `window`. A test keeps both
 at zero. The same engine can then run in Node
 behind an API, with the browser as a client, instead of being rewritten.
+
+## 7. What Google's ADK 2.0 taught us (28/09/2026)
+
+Google's Agent Development Kit went to 2.0 in 2026 (Python GA 19/05, Go 30/06, TypeScript 21/08) and
+rebuilt itself around the same idea as this document: a **graph runtime** where agents, tools and
+plain functions are all nodes, routes select conditional edges, a join node fans in, and a node can
+pause for a human. Reading it against Swarm Studio node by node gave two kinds of results: things we
+already had under another name, and things we did not have at all.
+
+**Already here.** Graph routes ≈ `choose` dispatch + labelled links (§3.1). Join node ≈ Join (§3.2).
+`NodeInterruptedError` / human input ≈ Human gate (§3.3). Dynamic workflows (nodes created at run
+time) ≈ Spawn (§3.6). Sub-workflows ≈ Blocks (§3.5). Session state with `app:` / `user:` / `temp:`
+scopes ≈ Memory nodes, with access links in place of prefixes (§3.4). ADK's split between an event's
+`content` (shown to the user) and its `output` (passed to the next node) is our split between `prose`
+and the carried message.
+
+**Taken, in this pass.**
+
+1. **Retries, as ADK's `RetryConfig`.** ADK retries a failed node with `max_attempts`,
+   `initial_delay`, `max_delay`, `backoff_factor`, `jitter` (defaults 5, 1 s, 60 s, 2, 1). Before this
+   pass, one 429 from a provider killed a twelve-agent run. Now `spec.retry`, `agent.retry` and
+   `decision.retry` take the same fields in milliseconds (`engine/retry.ts`). Two deliberate
+   departures. ADK retries *every* exception by default; here the default is `on: "transient"` (429,
+   408/409/425, 5xx, network drops, "rate limit", "overloaded", timeouts), because the key is the
+   user's own and a bad key or a missing model fails identically every time. And the defaults are
+   smaller (3 attempts, 30 s cap), because someone is watching the tab. A retry clears what the failed
+   attempt streamed (`onMessageReset`) and says so in a notice; a stop during the wait ends it at once.
+   A pasted spec is clamped (10 attempts, 120 s per wait).
+2. **`outputKey`, as ADK's `output_key`.** In ADK an agent's final answer can land in session state
+   without the model doing anything. Here an agent with `outputKey: "draft"` has each answer written
+   under `draft` in every Memory node it may **write** to. It goes through the same path as a
+   `<write>` tag, so permissions, versions, bus wake-ups and the transcript chips all apply. The graph
+   still grants the right; the field only saves the model from having to remember a tag, which small
+   models forget.
+
+**Left out, and why.**
+
+- *Instruction templating* (`{key}` / `<Class.field from node>` in an instruction). Readers already
+  receive their memories in the system prompt, ranked by overlap (§3.4). Templating adds a second way
+  to do the same thing, and a template that points at a missing key needs its own error story. Worth
+  it the day prompts are shared as a library.
+- *Rewind sessions*. Real value (rerun from round N without paying for rounds 1…N−1 again), but it
+  needs the per-round checkpoint §6 already keeps out: memory, cursors, holdings and spawn counts all
+  have to be snapshotted. The next pass that touches `session.ts`.
+- *Evaluation with user simulation*. ADK drives an agent with a simulated user and scores the
+  conversation. The Human gate could be answered by a model the same way, which would make a gated
+  swarm testable end to end; it belongs with a test harness we do not have yet.
+- *Input/output schemas on nodes*. The `json` predicate reads structured output leniently already;
+  a hard schema would need provider-side structured output, which half our providers lack.
+- *Plugins* (global before/after hooks). Our callbacks (§3.8) already see everything; plugins that
+  can *change* a call are a security question for pasted swarms, not a convenience.
+- *A2A* (agent-to-agent over HTTP). Needs the server of §6.
