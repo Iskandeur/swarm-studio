@@ -120,12 +120,13 @@ POSITIONS: {"x":number,"y":number} in pixels. The flow reads left to right: abou
 TOPOLOGY: broadcast = a message goes along every outgoing link; round-robin = one outgoing link per turn, rotating; manager = the entry agent delegates, workers report back to it.
 maxRounds: the step budget; every round where anything speaks costs one. Keep it just above the longest path (loops included).
 
-AGENT: {"id","name","provider","model","systemPrompt","temperature":0-2,"hue":0-360,"position","maxTokens"?:int,"dispatch"?:"inherit"|"all"|"rotate"|"choose","canSpawn"?:bool}
+AGENT: {"id","name","provider","model","systemPrompt","temperature":0-2,"hue":0-360,"position","maxTokens"?:int,"dispatch"?:"inherit"|"all"|"rotate"|"choose","canSpawn"?:bool,"outputKey"?:string,"retry"?:{"maxAttempts"?:int}}
 - provider: ${providers}. Use provider "${defaults.provider}" and model "${defaults.model}" for every agent unless the instruction names others.
 - systemPrompt: the agent's role in the second person, specific and in a voice of its own. Each turn is one short paragraph; say what this agent contributes and what it must not do.
 - hue: give each agent a distinct hue.
 - dispatch "choose": the agent picks its branch by writing <route to="label"/>; its outgoing links need labels, and one may be "isDefault".
 - canSpawn true: the agent may create helpers at run time with <spawn name="Role">subtask</spawn>.
+- outputKey "k": each answer is written under key k in every memory the agent has write access to, without a tag. Prefer it to asking the agent to write its own answer.
 - Agents write to a memory with <write memory="Memory name" key="k">value</write> (they need a write access link).
 
 NODES (every node: {"id","kind","name","position", …}):
